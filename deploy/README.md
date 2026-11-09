@@ -37,3 +37,17 @@ raw headers and passwords are not cached. Caches are local to each application i
 and are cleared on restart/credential rotation. Failed credentials are never cached.
 This bounds hashing work but does not replace hosting-edge request limits. During an
 attack, new logins may be throttled while already cached credentials continue to work.
+
+## Single-port test instance (no domain)
+
+`deploy/compose.port.yml` runs the same stack behind one plain-HTTP port on a shared
+host (for example `http://HOST:8095`). Only the Caddy gateway publishes a port; every
+request passes the API login via `forward_auth`. The worker is limited to 2 CPUs and 6 GB
+so other services on the host keep running. Without a domain there is no HTTPS, so the
+login travels unencrypted: use it for internal testing only, and `compose.pilot.yml`
+with a domain for customers. Production mode requires HTTPS, so this instance runs with
+`APP_ENV=development` and the login enabled through `PILOT_USERNAME` / `PILOT_PASSWORD_HASH`.
+
+On the test host the instance lives in `/opt/creatorshield` (`app/` is a clone of this
+repo; `creatorshield.env` and `db_password` are root-only). `./up.sh [git ref]` fetches,
+rebuilds and restarts it (default `origin/main`).
