@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from app.schemas import (
     CreateAnalysisOut,
     FindingOut,
     PolicyRef,
+    SponsorshipInput,
 )
 from app.storage import StorageError, analysis_prefix, get_storage
 
@@ -134,6 +136,7 @@ def create_analysis(
     caption: Annotated[str, Form()] = "",
     hashtags: Annotated[str, Form()] = "",
     client_label: Annotated[str, Form(max_length=100)] = "",
+    sponsorship: Annotated[str, Form(max_length=3000)] = "{}",
 ) -> CreateAnalysisOut:
     settings = get_settings()
     if platform not in PLATFORMS:
@@ -142,6 +145,10 @@ def create_analysis(
         raise HTTPException(422, "language must be en or hi.")
     if len(caption) > MAX_CAPTION:
         raise HTTPException(422, f"Caption must be at most {MAX_CAPTION} characters.")
+    try:
+        sponsor_context = SponsorshipInput.model_validate_json(sponsorship)
+    except ValidationError as exc:
+        raise HTTPException(422, "Invalid sponsorship details.") from exc
     tags = parse_hashtags(hashtags)
     try:
         ext, content_type = validate_extension(file.filename or "")
@@ -166,6 +173,7 @@ def create_analysis(
 
     analysis = Analysis(
         id=analysis_id,
+        sponsorship=sponsor_context.model_dump(),
         expires_at=datetime.now(UTC) + timedelta(hours=settings.retention_hours),
         platform=platform,
         language=language,

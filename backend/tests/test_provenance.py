@@ -276,7 +276,7 @@ def test_brand_agreement_requires_disclosure() -> None:
     assert findings[0].finding_type == "observed_evidence"
 
     findings, lines = _build({}, [brand], caption="#ad Loving my FitFuel shake")
-    assert findings == [] and lines[0]["status"] == "covered"
+    assert findings == [] and lines[0]["status"] == "info"
 
     findings, _ = _build({}, [brand], caption="Nothing about brands here")
     assert findings == []

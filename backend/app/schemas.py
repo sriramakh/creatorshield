@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Platform = Literal["youtube_shorts", "instagram_reels"]
 Language = Literal["en", "hi"]
@@ -184,6 +184,7 @@ class AnalysisSummaryOut(BaseModel):
 
 
 class AnalysisOut(AnalysisSummaryOut):
+    sponsorship: dict[str, Any] | None = None
     updated_at: datetime
     source_url: str | None = None
     source_media_id: str | None = None
@@ -230,7 +231,22 @@ class ConnectionOut(BaseModel):
     captions_enabled: bool = False
 
 
+class SponsorshipInput(BaseModel):
+    relationship: Literal[
+        "unknown", "none", "paid", "gifted", "affiliate", "employment", "other"
+    ] = "unknown"
+    sponsors: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("sponsors")
+    @classmethod
+    def clean_sponsors(cls, values: list[str]) -> list[str]:
+        if any(not v.strip() or len(v) > 100 for v in values):
+            raise ValueError("Sponsor names must contain 1–100 characters")
+        return list(dict.fromkeys(v.strip() for v in values))
+
+
 class ImportRequest(BaseModel):
+    sponsorship: SponsorshipInput = Field(default_factory=SponsorshipInput)
     connection_id: uuid.UUID
     url: str | None = Field(default=None, max_length=500)
     media_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")

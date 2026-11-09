@@ -13,7 +13,8 @@ import re
 from datetime import date
 from typing import Any
 
-from app.analysis.deterministic import _DISCLOSURE_RE, PLATFORM_RULES
+from app.analysis.deterministic import PLATFORM_RULES
+from app.analysis.disclosure import sponsor_disclosed
 from app.provenance.ledger import (
     LedgerEntry,
     find_entries,
@@ -296,7 +297,13 @@ def build(
 
     # ---- brand agreements vs disclosure -------------------------------------
     texts = _text_items(caption, hashtags, extraction)
-    disclosed = any(p.search(t["text"]) for t in texts for p in _DISCLOSURE_RE)
+    mentioned = [
+        e
+        for e in entries
+        if e.kind in BRAND_KINDS
+        and e.applies_to(platform, client_label)
+        and any(find_entries([e], BRAND_KINDS, text=t["text"], **scope) for t in texts)
+    ]
     for entry in entries:
         if entry.kind not in BRAND_KINDS or not entry.applies_to(platform, client_label):
             continue
@@ -314,13 +321,14 @@ def build(
         if not hits:
             continue
         status = entry.status(today)
-        if disclosed:
+        if sponsor_disclosed(caption, entry.terms, len(mentioned) > 1):
             lines.append(
                 _line(
                     "brand",
                     entry.counterparty,
-                    "covered",
-                    "Brand mentioned and a disclosure was found. Also turn on the platform's "
+                    "info",
+                    "Opening-caption disclosure wording detected; adequacy needs human review. "
+                    "On-screen duration and prominence were not verified. Enable the platform's "
                     "paid-partnership / paid-promotion setting when publishing.",
                     records=[entry],
                     today=today,
@@ -344,7 +352,7 @@ def build(
                 finding_type="observed_evidence",
                 severity="high" if status == "active" else "medium",
                 confidence="high",
-                title=f"Paid agreement with {entry.counterparty}, but no disclosure",
+                title=f"Paid agreement with {entry.counterparty}: opening disclosure needs review",
                 explanation=(
                     f"Your rights ledger records a paid agreement with {entry.counterparty}"
                     + (
@@ -354,9 +362,10 @@ def build(
                         if status == "not_started"
                         else " (now ended)"
                     )
-                    + ", and this video mentions them, but no disclosure such as #ad, "
-                    "'paid partnership' or 'sponsored' was found in the caption, speech or "
-                    "on-screen text. Platforms and ASCI require material connections to be "
+                    + ", but no associated opening disclosure such as #ad, "
+                    "'paid partnership' or 'sponsored' was established in the caption. "
+                    "Video or speech disclosure may exist and requires review. "
+                    "Platforms and ASCI require material connections to be "
                     "disclosed clearly."
                 ),
                 suggested_action=(

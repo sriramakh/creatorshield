@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.analysis.disclosure import caption_disclosure, disclosure_sentences
 from app.schemas import FindingDraft
 
 PLATFORM_RULES: dict[str, dict[str, list[str]]] = {
@@ -48,23 +49,6 @@ _PROMO_PATTERNS = [
     r"(?:छूट|डिस्काउंट)",
     r"लिंक\s+बायो",
 ]
-_DISCLOSURE_PATTERNS = [
-    r"#ad\b",
-    r"#advert(?:isement)?\b",
-    r"#sponsored\b",
-    r"#paidpartnership\b",
-    r"#partner\b",
-    r"#collab\b",
-    r"\bpaid\s+partnership\b",
-    r"\bsponsored\b(?!\s+by\b)",
-    r"\bthis\s+(?:video|post|reel)\s+is\s+sponsored\b",
-    r"\bsponsored\s+by\b",
-    r"\b(?:ad|advertisement)\s*[:|-]",
-    r"\bgifted\b",
-    r"\baffiliate\s+link",
-    r"विज्ञापन",
-    r"प्रायोजित",
-]
 _HEALTH_CLAIM_PATTERNS = [
     r"\bcure[sd]?\b",
     r"\bguarantee[sd]?\b",
@@ -86,7 +70,6 @@ _WATERMARK_PATTERNS = [
 ]
 
 _PROMO_RE = [re.compile(p, re.IGNORECASE) for p in _PROMO_PATTERNS]
-_DISCLOSURE_RE = [re.compile(p, re.IGNORECASE) for p in _DISCLOSURE_PATTERNS]
 _HEALTH_RE = [re.compile(p, re.IGNORECASE) for p in _HEALTH_CLAIM_PATTERNS]
 _WATERMARK_RE = [re.compile(p, re.IGNORECASE) for p in _WATERMARK_PATTERNS]
 
@@ -159,6 +142,7 @@ def run_deterministic_checks(
     extraction: dict[str, Any],
     duration: float,
     analysis_mode: str = "full_video",
+    sponsorship: dict[str, Any] | None = None,
 ) -> list[FindingDraft]:
     rules = PLATFORM_RULES[platform]
     items = collect_text_items(caption, hashtags, extraction)
@@ -166,8 +150,11 @@ def run_deterministic_checks(
 
     # 1. Promotion signals without a visible disclosure ------------------------
     promo_hits = _matches(items, _PROMO_RE)
-    disclosure_hits = _matches(items, _DISCLOSURE_RE)
-    if promo_hits and not disclosure_hits:
+    context = sponsorship or {}
+    sponsors = context.get("sponsors", [])
+    declared = context.get("relationship", "unknown") not in {"unknown", "none"}
+    disclosed = caption_disclosure(caption, sponsors)
+    if (promo_hits or declared) and not disclosed:
         start, end = _span(promo_hits)
         label = (
             "YouTube's paid promotion setting"
@@ -184,8 +171,10 @@ def run_deterministic_checks(
                 title="Promotional language without a visible sponsorship disclosure",
                 explanation=(
                     "The caption, speech or on-screen text contains promotion signals (discount "
-                    "codes, 'link in bio', percentage-off offers) but no disclosure such as "
-                    "#ad, 'paid partnership' or 'sponsored' was found. If you received payment, "
+                    "codes or offers), or a commercial relationship was declared. "
+                    "No sufficiently associated opening-caption disclosure such as "
+                    "#ad or 'sponsored' was detected. Video or spoken wording alone "
+                    "does not resolve this check. If you received payment, "
                     "free products, commission or any other benefit, the platform expects this "
                     "to be disclosed. This check cannot tell whether a commercial relationship "
                     "actually exists."
@@ -199,6 +188,32 @@ def run_deterministic_checks(
                 start_seconds=start,
                 end_seconds=end,
                 evidence=_evidence(promo_hits),
+                policy_rule_ids=rules["disclosure"],
+                requires_human_review=True,
+            )
+        )
+
+    if promo_hits or declared or any(disclosure_sentences(i.text) for i in items):
+        findings.append(
+            FindingDraft(
+                source="deterministic",
+                category="disclosure",
+                finding_type="cannot_check",
+                severity="info",
+                confidence="high",
+                title="Disclosure adequacy needs human review",
+                explanation=(
+                    "Disclosure wording detected in the opening caption. "
+                    if disclosed
+                    else "Opening disclosure is missing, ambiguous or not linked to every sponsor. "
+                )
+                + "Caption position is a heuristic, not a platform visibility measurement. "
+                "Sampled frames cannot establish label duration, readability or prominence. "
+                "Relationship: " + context.get("relationship", "unknown") + ". "
+                "Sponsors: " + (", ".join(sponsors) or "not supplied") + ".",
+                suggested_action="Review each sponsor's disclosure in the final caption and video. "
+                "Verify on-screen timing and readability, and confirm the platform "
+                "paid-promotion setting at publishing. That setting was not verified.",
                 policy_rule_ids=rules["disclosure"],
                 requires_human_review=True,
             )

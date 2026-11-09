@@ -479,6 +479,7 @@ export const api = {
     language: Language;
     client_label?: string;
     attach_owner_file?: boolean;
+    sponsorship?: import("@/components/SponsorshipFields").Sponsorship;
   }) =>
     request<{ id: string; status: string }>("/api/analyses/import", {
       method: "POST",

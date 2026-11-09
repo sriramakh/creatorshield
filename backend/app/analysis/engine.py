@@ -218,6 +218,7 @@ def _run(
         extraction,
         duration or 0.0,
         analysis_mode=analysis.analysis_mode,
+        sponsorship=analysis.sponsorship,
     )
     drafts.extend(cross_findings)
 
@@ -240,6 +241,7 @@ def _run(
             frames_dir=work_dir / "frames",
             kb=kb,
             analysis_mode=analysis.analysis_mode,
+            sponsorship=analysis.sponsorship,
         )
         result = provider.analyze(payload)
         analysis.ai_status = "mock" if result.is_mock else "completed"

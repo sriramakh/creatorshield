@@ -1,5 +1,7 @@
 "use client";
 
+import { SponsorshipFields, EMPTY_SPONSORSHIP } from "./SponsorshipFields";
+
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { uploadAnalysis, type Language, type Platform } from "@/lib/api";
@@ -28,6 +30,7 @@ export function UploadForm() {
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState("");
   const [clientLabel, setClientLabel] = useState("");
+  const [sponsorship, setSponsorship] = useState(EMPTY_SPONSORSHIP);
   const [authorized, setAuthorized] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -82,6 +85,7 @@ export function UploadForm() {
     form.append("platform", platform);
     form.append("language", language);
     form.append("caption", caption);
+    form.append("sponsorship", JSON.stringify({ ...sponsorship, sponsors: sponsorship.sponsors.map(s => s.trim()).filter(Boolean) }));
     form.append("hashtags", hashtags);
     if (clientLabel.trim()) form.append("client_label", clientLabel.trim());
     try {
@@ -94,6 +98,7 @@ export function UploadForm() {
       setCaption("");
       setHashtags("");
       setClientLabel("");
+      setSponsorship(EMPTY_SPONSORSHIP);
       setAuthorized(false);
       setProgress(null);
       router.push(`/analyses/${res.id}`);
@@ -271,6 +276,8 @@ export function UploadForm() {
               Groups this video in the catalogue, so footage reused under a different client is flagged.
             </p>
           </div>
+
+          <SponsorshipFields value={sponsorship} onChange={setSponsorship} />
 
           <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
             <input

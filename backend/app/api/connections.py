@@ -150,6 +150,7 @@ def import_analysis(body: ImportRequest, db: DB) -> CreateAnalysisOut:
         hours = min(hours, settings.youtube_max_retention_hours)
     waiting = body.attach_owner_file
     analysis = Analysis(
+        sponsorship=body.sponsorship.model_dump(),
         expires_at=datetime.now(UTC) + timedelta(hours=hours),
         platform=TARGET_PLATFORM[conn.platform],
         language=body.language,

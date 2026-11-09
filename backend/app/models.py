@@ -77,6 +77,8 @@ class Analysis(Base):
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
+    sponsorship: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     # Optional client / account name (agency use). Groups the catalogue so a match
     # with another client's footage can be told apart from the same client's reposts.
     client_label: Mapped[str | None] = mapped_column(String(100), nullable=True)

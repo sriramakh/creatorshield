@@ -150,3 +150,23 @@ containers (reads `backend/.env`). The compose file is syntax-validated but has
 - [DECISIONS.md](DECISIONS.md) — key technical decisions and trade-offs
 - [TASKS.md](TASKS.md) — milestone status and backlog
 - [TEST_RESULTS.md](TEST_RESULTS.md) — what was tested and how
+
+### Sponsored-content review
+
+Uploads and account imports accept declared commercial relationships and sponsor names.
+These declarations are stored with the analysis and passed to the AI as untrusted user
+assertions. Existing analyses without declarations remain supported.
+
+Disclosure checks reject negated or uncertain wording, flag late/buried caption labels,
+and check named sponsors separately. Accepted wording includes Ad, Advertisement,
+Sponsored, Collaboration, Partnership, Employee, Free gift, Affiliate and Hindi labels.
+The opening-caption check uses an 80-character review heuristic; it is not a legal
+threshold or a measurement of the platform's actual caption truncation.
+
+Detected wording does not establish adequate disclosure. On-screen label duration,
+readability and prominence require human review; platform paid-promotion settings remain
+unverified. The ASCI summary now includes the March 2025 technical-advice clarification.
+India guidance is advisory; the tool does not determine applicable jurisdiction.
+
+Run `alembic upgrade head` before starting the updated application. Rerun existing
+analyses to apply the new disclosure checks; historical reports are not automatically rewritten.

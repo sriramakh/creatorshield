@@ -1,5 +1,7 @@
 "use client";
 
+import { SponsorshipFields, EMPTY_SPONSORSHIP } from "./SponsorshipFields";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -26,6 +28,7 @@ export function ImportFromAccount() {
   const [link, setLink] = useState("");
   const [language, setLanguage] = useState<Language>("en");
   const [clientLabel, setClientLabel] = useState("");
+  const [sponsorship, setSponsorship] = useState(EMPTY_SPONSORSHIP);
   const [authorized, setAuthorized] = useState(false);
   const [ownerFile, setOwnerFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -78,6 +81,7 @@ export function ImportFromAccount() {
     try {
       const res = await api.importAnalysis({
         connection_id: conn.id,
+        sponsorship: { ...sponsorship, sponsors: sponsorship.sponsors.map(s => s.trim()).filter(Boolean) },
         language,
         attach_owner_file: Boolean(ownerFile),
         ...(clientLabel.trim() ? { client_label: clientLabel.trim() } : {}),
@@ -293,6 +297,7 @@ export function ImportFromAccount() {
           </div>
         </div>
 
+        <SponsorshipFields value={sponsorship} onChange={setSponsorship} />
         <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
           <input
             type="checkbox"

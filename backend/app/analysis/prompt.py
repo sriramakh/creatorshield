@@ -94,6 +94,8 @@ like a repost) with frame evidence, say what you saw, and never state who owns i
 copyrighted. You cannot see the creator's account history or platform settings.
 - Never state or imply that following your advice guarantees the video will not be removed, \
 demonetized, struck or banned.
+- Review each declared sponsor separately. A denial such as "not sponsored" is not a disclosure.
+- Disclosure words alone do not establish adequate prominence, duration or platform settings.
 - suggested_action must be specific and practical (what to cut, reword, disclose, or verify).
 - Write summary, explanations and actions in clear English even when the content is Hindi; \
 quote Hindi evidence in its original script.
@@ -148,6 +150,7 @@ def build_prompt(
     frames_dir: Path,
     kb: PolicyKB,
     analysis_mode: str = "full_video",
+    sponsorship: dict[str, Any] | None = None,
 ) -> PromptPayload:
     boundary = secrets.token_hex(8)
     system = SYSTEM_PROMPT.replace("{boundary}", boundary)
@@ -187,6 +190,12 @@ def build_prompt(
     def untrusted(label: str, body: str) -> TextPart:
         return TextPart(f"{label}\n<untrusted-{boundary}>\n{body}\n</untrusted-{boundary}>")
 
+    parts.append(
+        untrusted(
+            "DECLARED SPONSORSHIP (user assertions, not verified facts):",
+            _clean(json.dumps(sponsorship or {}, ensure_ascii=False), boundary, 3000),
+        )
+    )
     parts.append(untrusted("CAPTION:", _clean(caption or "(none)", boundary, MAX_CAPTION_CHARS)))
     tags = " ".join(f"#{_clean(h, boundary, 100)}" for h in hashtags) or "(none)"
     parts.append(untrusted(f"HASHTAGS ({len(hashtags)}):", tags))

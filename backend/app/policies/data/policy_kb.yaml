@@ -7,7 +7,7 @@
 #
 # To update: re-fetch each official_url, revise key_points, bump `version` and
 # `verified_on`. Never add a rule whose page has not been read.
-version: "2026.10.21"
+version: "2026.11.09"
 verified_on: 2026-10-21
 notes: >-
   Verified by fetching each official page on 2026-10-21. Meta transparency pages
@@ -457,11 +457,11 @@ rules:
     category: disclosure
     title: ASCI influencer advertising guidelines (India)
     official_title: GUIDELINES FOR INFLUENCER ADVERTISING IN DIGITAL MEDIA
-    official_url: https://www.ascionline.in/wp-content/uploads/2023/08/GUIDELINES-FOR-INFLUENCER-ADVERTISING-IN-DIGITAL-MEDIA.pdf
-    verified_on: 2026-10-21
+    official_url: https://www.ascionline.in/the-asci-code-guidelines/
+    verified_on: 2026-11-09
     key_points:
       - "Any material connection with an advertiser (money, free products, discounts, trips, family or employment ties) requires a disclosure label even if the review is unbiased."
       - "Disclosure must be upfront and prominent - not only in a bio, at the end, behind 'more', or buried among hashtags; platform tools are in addition to the influencer's own disclosure."
       - "For video without accompanying text the label must be overlaid on screen: at least 3 seconds for videos of 15 seconds or less, one-third of the duration for videos up to 2 minutes."
       - "Accepted labels include Advertisement, Ad, Sponsored, Collaboration, Partnership, Employee, Free gift and Affiliate."
-      - "Health/nutrition and financial influencers need relevant qualifications and must state them upfront."
+      - "The 6 March 2025 addendum requires relevant qualifications for technical advice or claims about commercial health/nutrition and financial products, with prominent qualification disclosures. Unqualified influencers may share generic information that is not technical advice."
