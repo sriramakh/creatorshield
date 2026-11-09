@@ -1,0 +1,64 @@
+# Containerised local stack. On a 16 GB Mac the native setup (scripts/dev.sh) is
+# lighter; use this when you want an isolated, reproducible environment.
+#
+#   docker compose up --build
+#   open http://localhost:3000
+#
+# Put secrets in backend/.env (git-ignored); it is loaded by api and worker.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: creatorshield
+      POSTGRES_PASSWORD: creatorshield_dev
+      POSTGRES_DB: creatorshield
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creatorshield"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    env_file: [./backend/.env]
+    environment: &backend-env
+      DATABASE_URL: postgresql+psycopg://creatorshield:creatorshield_dev@postgres:5432/creatorshield
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /app/var/storage
+      HF_HOME: /app/var/hf
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports: ["8000:8000"]
+    volumes: [media:/app/var]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: ./backend
+    env_file: [./backend/.env]
+    environment: *backend-env
+    command: python -m app.worker
+    volumes: [media:/app/var]
+    depends_on:
+      api: { condition: service_started }
+    deploy:
+      resources:
+        limits: { memory: 3g }
+
+  frontend:
+    build:
+      context: ./frontend
+      args: { NEXT_PUBLIC_API_URL: "http://localhost:8000" }
+    ports: ["3000:3000"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  media:

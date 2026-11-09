@@ -1,0 +1,25 @@
+# secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# runtime data (uploaded videos, frames, logs)
+var/
+backend/var/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# node
+node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+
+# os
+.DS_Store

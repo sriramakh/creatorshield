@@ -1,0 +1,467 @@
+# CreatorShield policy knowledge base.
+#
+# Every rule maps one CreatorShield rule ID to ONE official policy page that was
+# fetched and read on `verified_on`. Key points are paraphrases of what the page
+# says (not legal text). Platforms do not publish rule numbers, so the IDs are
+# our own stable identifiers. `quote` is a verbatim excerpt when one was captured.
+#
+# To update: re-fetch each official_url, revise key_points, bump `version` and
+# `verified_on`. Never add a rule whose page has not been read.
+version: "2026.10.21"
+verified_on: 2026-10-21
+notes: >-
+  Verified by fetching each official page on 2026-10-21. Meta transparency pages
+  were rendered in a headless browser because their text is built client-side.
+  help.instagram.com/477434105621119 (Instagram Community Guidelines) now
+  redirects to Meta's Community Standards; /fraud-scams/ redirects to
+  /prohibited-commercial-practices/. Facebook's "Original content guidelines"
+  were excluded because they apply to Facebook, not Instagram.
+
+rules:
+  # ------------------------------------------------------------------ YouTube
+  - id: YT-CG-OVERVIEW
+    platform: youtube
+    category: community_guidelines
+    title: YouTube Community Guidelines (overview)
+    official_title: YouTube's Community Guidelines
+    official_url: https://support.google.com/youtube/answer/9288567
+    verified_on: 2026-10-21
+    key_points:
+      - "Guidelines are grouped into spam & deceptive practices, sensitive content (child safety, nudity/sexual, self-harm, vulgar language), violent or dangerous content (hate, harassment, graphic violence, violent criminal organisations, dangerous behaviour), regulated goods, and misinformation."
+      - "Content that would otherwise violate may stay up with educational, documentary, scientific or artistic (EDSA) context or when in the public interest; EDSA is not a licence to break the guidelines."
+      - "Creators whose on- or off-platform behaviour harms users, the community or the ecosystem may face actions up to account termination depending on severity and patterns."
+
+  - id: YT-CG-HATE
+    platform: youtube
+    category: hate_harassment
+    title: Hate speech
+    official_title: Hate speech policy
+    official_url: https://support.google.com/youtube/answer/2801939
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits content encouraging violence or hatred against people based on protected attributes including age, caste, ethnicity, race, disability, immigration status, nationality, religion, sex/gender, sexual orientation, veteran status, and victims of major violent events."
+      - "Prohibited examples: dehumanising comparisons (animals, insects, pests, disease), slurs or stereotypes promoting hatred, claims of a group's inferiority, hateful supremacism, denying well-documented violent events."
+      - "Applies to video, descriptions, comments, live streams and external links."
+      - "EDSA exceptions (condemning, refuting or satirising hate) require the context in the video's images or audio; title or description alone is not enough."
+
+  - id: YT-CG-HARASS
+    platform: youtube
+    category: hate_harassment
+    title: Harassment & cyberbullying
+    official_title: Harassment & cyberbullying policies
+    official_url: https://support.google.com/youtube/answer/2802268
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits prolonged insults or slurs based on intrinsic attributes (protected group status, physical traits, survivor status)."
+      - "Prohibits threats and doxxing such as sharing someone's phone number, email or home address; stricter rules for minors."
+      - "Prohibits unauthorised impersonation, including using AI to copy a person's voice or likeness to appear owned or authorised by them."
+      - "Exceptions may apply for EDSA content, public-interest debate about high-profile people, scripted satire, comedy or music; these do not excuse harassment framed as a joke."
+
+  - id: YT-CG-VIOLENT
+    platform: youtube
+    category: violence
+    title: Violent or graphic content
+    official_title: Violent or graphic content policies
+    official_url: https://support.google.com/youtube/answer/2802008
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits inciting violence, fights involving minors, and footage of attacks, corpses or torture intended to shock or disgust."
+      - "Prohibits animal abuse (including coerced animal fights and staged rescues) and footage filmed by perpetrators of deadly or major violent events."
+      - "Dramatised or fictional violence violates when viewers lack enough context to know it is fictional."
+      - "Graphic content with sufficient context may be age-restricted rather than removed; for educational use the context must be in the video's images or audio."
+
+  - id: YT-CG-SEXUAL
+    platform: youtube
+    category: sexual_content
+    title: Nudity & sexual content
+    official_title: Nudity & Sexual Content Policy
+    official_url: https://support.google.com/youtube/answer/2802002
+    verified_on: 2026-10-21
+    key_points:
+      - "Explicit content meant to be sexually gratifying is not allowed and can lead to removal or channel termination."
+      - "Fetish content is removed or age-restricted; violent, graphic or humiliating fetishes are generally not allowed."
+      - "Nudity or sexual content not meeting removal criteria may be age-restricted."
+      - "Sexual content may be allowed when its primary purpose is EDSA and it is not gratuitous."
+
+  - id: YT-CG-DANGEROUS
+    platform: youtube
+    category: dangerous_content
+    title: Harmful or dangerous content
+    official_title: Harmful or dangerous content policy
+    official_url: https://support.google.com/youtube/answer/2801964
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits content encouraging dangerous or illegal activities that risk serious physical harm or death."
+      - "Covers dangerous challenges, pranks causing fear of serious danger or distress to minors/vulnerable people, misuse of weapons without safety precautions, minors in dangerous activities, and instructions for harming others, hacking or phishing."
+      - "EDSA context (explaining risks, showing safety precautions and training) can allow such content, which may still be age-restricted."
+    quote: "Saying, “Don’t try this at home” is not sufficient context."
+
+  - id: YT-CG-SPAM
+    platform: youtube
+    category: spam_deception
+    title: Spam, deceptive practices & scams
+    official_title: Spam Policy
+    official_url: https://support.google.com/youtube/answer/2801973
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits misleading viewers to boost engagement and flooding community spaces with inorganic promotion, across videos, comments, links, posts, thumbnails and channel networks."
+      - "Fake engagement is banned, including incentivised subscriptions and sub-for-sub schemes."
+      - "Malicious clickbait - titles, thumbnails, descriptions or imagery that trick users into content that does not deliver what was promised - is a violation."
+      - "Re-uploading popular clips in full without transformative editing, reaction or educational breakdown is given as a violation example."
+      - "Three strikes within 90 days may lead to channel termination."
+
+  - id: YT-CG-MEDMISINFO
+    platform: youtube
+    category: misinformation
+    title: Medical misinformation
+    official_title: Medical misinformation policy
+    official_url: https://support.google.com/youtube/answer/13813322
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits prevention misinformation contradicting health-authority guidance, e.g. on approved vaccines, or promoting harmful substances for prevention."
+      - "Prohibits treatment misinformation such as promoting harmful unapproved remedies, or claiming alternative cancer treatments are safer or more effective than approved care."
+      - "Exceptions may apply with added context from health authorities or experts, for public-interest content, or content that disputes or satirises misinformation."
+      - "Discussing specific study results and firsthand experiences may be allowed; a pattern of promoting medical misinformation can still lead to removal."
+
+  - id: YT-MON-AD-FRIENDLY
+    platform: youtube
+    category: monetization
+    title: Advertiser-friendly content guidelines
+    official_title: Advertiser-friendly content guidelines
+    official_url: https://support.google.com/youtube/answer/6162278
+    verified_on: 2026-10-21
+    key_points:
+      - "For YouTube Partner Program creators: each video or Short receives full ads, limited ads or no ads; video, thumbnail, title, description and tags are all evaluated."
+      - "Topic areas include inappropriate language, violence, adult content, shocking content, harmful acts, hateful content, recreational drugs, firearms, controversial issues, sensitive events, dishonest behaviour, incendiary/demeaning content and tobacco."
+      - "Profanity at the start or throughout may make a video unsuitable for ads; occasional profanity may not."
+      - "Graphic content in the thumbnail or first seven seconds is treated more strictly than later in the video."
+
+  - id: YT-MON-YPP
+    platform: youtube
+    category: originality
+    title: Channel monetization policies - reused & inauthentic content
+    official_title: YouTube channel monetization policies
+    official_url: https://support.google.com/youtube/answer/1311392
+    verified_on: 2026-10-21
+    key_points:
+      - "Reused content - repurposing others' content without significant original commentary, modification, or educational or entertainment value - can make an entire channel ineligible to monetise, even with the original creator's permission."
+      - "Reaction videos with commentary and critical reviews using clips are acceptable examples."
+      - "Songs changed only in pitch or speed, and content relying on non-verbal reactions without voice commentary, are unacceptable examples."
+      - "'Inauthentic content' covers mass-produced or templated content, e.g. image slideshows or scrolling text with little narrative, and AI-generated content from generic templates without the creator's own insight."
+
+  - id: YT-DISC-PAID-PROMO
+    platform: youtube
+    category: disclosure
+    title: Paid product placements, sponsorships & endorsements disclosure
+    official_title: Add branded content restrictions & disclosure labels
+    official_url: https://support.google.com/youtube/answer/154235
+    verified_on: 2026-10-21
+    key_points:
+      - "If a video includes branded content, sponsorships, endorsements or other commercial relationships, the creator must tell YouTube by selecting the paid promotion option in video details."
+      - "Selecting paid promotion adds a disclosure label at the beginning of the video."
+      - "Branded content must comply with the Community Guidelines and Google Ads policies; creators and partners are responsible for applicable legal requirements."
+
+  - id: YT-COPY-BASICS
+    platform: youtube
+    category: copyright
+    title: Copyright on YouTube
+    official_title: Copyright on YouTube
+    official_url: https://support.google.com/youtube/answer/2797466
+    verified_on: 2026-10-21
+    key_points:
+      - "Copyright protects original creative works fixed in a tangible medium, not ideas, facts or processes."
+      - "Ways to use others' material include exceptions such as fair use, public-domain works, permission, Creative Commons licences, and YouTube's Audio Library or Creator Music."
+      - "None of these options guarantees avoiding a copyright strike or Content ID claim."
+      - "YouTube removes content after a valid copyright removal request; uploaders may file a counter notification."
+
+  - id: YT-COPY-FAIR-USE
+    platform: youtube
+    category: copyright
+    title: Fair use on YouTube
+    official_title: Fair use on YouTube
+    official_url: https://support.google.com/youtube/answer/9783148
+    verified_on: 2026-10-21
+    key_points:
+      - "Under U.S. law, fair use is decided case by case by courts using four factors: purpose and character, nature of the work, amount used, and market effect."
+      - "Transformative uses adding new expression or meaning (commentary, criticism, parody) are more likely to be fair."
+      - "Crediting the owner or adding 'no copyright infringement intended' does not by itself make a use fair."
+      - "Adding your own material does not guarantee fair use; even a few seconds can trigger a claim."
+
+  - id: YT-DISC-SYNTHETIC
+    platform: youtube
+    category: synthetic_media
+    title: Disclosing altered or synthetic content
+    official_title: Disclosing use of GenAI content
+    official_url: https://support.google.com/youtube/answer/14328491
+    verified_on: 2026-10-21
+    key_points:
+      - "Creators must disclose realistic AI-generated or altered content, e.g. making a real person appear to say or do something they did not, altering footage of real events or places, or generating realistic scenes that never happened."
+      - "No disclosure is needed for clearly unrealistic content, beauty filters, minor edits, or production help such as AI-drafted scripts or titles."
+      - "Creators who consistently fail to disclose may have labels applied, content removed, or face YouTube Partner Program suspension."
+
+  - id: YT-CTX-EDSA
+    platform: youtube
+    category: context_exceptions
+    title: Educational, documentary, scientific & artistic (EDSA) context
+    official_title: How YouTube evaluates Educational, Documentary, Scientific & Artistic (EDSA) content
+    official_url: https://support.google.com/youtube/answer/6345162
+    verified_on: 2026-10-21
+    key_points:
+      - "YouTube first checks whether content violates a policy, then considers what context is provided and where it appears."
+      - "Accepted context includes basic facts (who, what, when, where, why), condemnation, counterpoints or satire, and discouraging imitation by explaining the harm."
+      - "For the highest-risk areas (hate speech, violent criminal orgs, child safety, suicide/self-harm, graphic violence) context must be in the video or audio, not only in title, description or tags."
+      - "Context does not guarantee an exception; content may still be age-restricted or carry a warning."
+
+  - id: YT-HASHTAGS
+    platform: youtube
+    category: spam_deception
+    title: Hashtag rules
+    official_title: Find playlists & videos using hashtags
+    official_url: https://support.google.com/youtube/answer/6390658
+    verified_on: 2026-10-21
+    key_points:
+      - "If a video has more than 60 hashtags, YouTube ignores every hashtag on that content."
+      - "Do not add too many tags or hashtags that are not directly related to the video."
+      - "Do not add hashtags intended to harass, humiliate, intimidate, expose or threaten an individual, or that promote violence or hatred."
+    quote: "If a video or playlist has more than 60 hashtags, we'll ignore each hashtag on that content."
+
+  # ------------------------------------------------- Meta (applies to Instagram)
+  - id: META-CS-OVERVIEW
+    platform: meta_all
+    category: community_guidelines
+    title: Meta Community Standards (Instagram, Facebook, Threads)
+    official_title: Community Standards
+    official_url: https://transparency.meta.com/policies/community-standards/
+    verified_on: 2026-10-21
+    key_points:
+      - "Instagram's Community Guidelines page now redirects here; the Community Standards cover Facebook, Instagram, Messenger and Threads, and apply to all content types including AI-generated content."
+      - "Each policy lists what is not allowed and what needs extra context, a warning screen, or is limited to adults 18+."
+      - "Otherwise-violating content may be allowed if newsworthy and in the public interest, weighed against the risk of harm."
+
+  - id: META-CS-HATE
+    platform: meta_all
+    category: hate_harassment
+    title: Hateful conduct
+    official_title: Hateful Conduct
+    official_url: https://transparency.meta.com/policies/community-standards/hateful-conduct/
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits direct attacks on people based on protected characteristics including race, ethnicity, national origin, disability, religious affiliation, caste, sexual orientation, sex, gender identity and serious disease."
+      - "Tier 1 bans dehumanising comparisons, allegations of serious criminality, slurs, harmful stereotypes and mocking hate-crime victims; Tier 2 bans calls for exclusion, insults about character or intellect, expressions of disgust and targeted cursing."
+      - "Allowed when intent is clear: condemning or reporting on hateful speech, self-referential or empowering use, and satire targeting the violating elements."
+
+  - id: META-CS-VIOLENCE
+    platform: meta_all
+    category: violence
+    title: Violence and incitement
+    official_title: Violence and Incitement
+    official_url: https://transparency.meta.com/policies/community-standards/violence-incitement/
+    verified_on: 2026-10-21
+    key_points:
+      - "Removes threats of violence - statements of intent, calls to action, aspirational or conditional statements - against a target, judged by severity and target."
+      - "Removes requests for violent services, instructions to make or use weapons with intent to harm, and threats to bring weapons to places such as schools or polling sites."
+      - "Threats shared to raise awareness or condemn, and lesser threats in contact-sport contexts, are not prohibited."
+
+  - id: META-CS-BULLYING
+    platform: meta_all
+    category: hate_harassment
+    title: Bullying and harassment
+    official_title: Bullying and Harassment
+    official_url: https://transparency.meta.com/policies/community-standards/bullying-harassment/
+    verified_on: 2026-10-21
+    key_points:
+      - "Protection depends on the target: private individuals and minors receive more protection than public figures (e.g. officials or people with over one million followers)."
+      - "Prohibited for everyone: calls for self-injury or suicide, severe sexualised commentary, derogatory sexualised photoshops, and threats to release private contact or medical information."
+      - "Private adults and minors are also protected from claims about sexual activity, dehumanising comparisons, negative focus on physical features, appearance rankings and harassing pranks."
+      - "Content clearly shared to condemn or raise awareness of bullying is allowed; videos of physical bullying against minors are banned in any context."
+
+  - id: META-CS-NUDITY
+    platform: meta_all
+    category: sexual_content
+    title: Adult nudity and sexual activity
+    official_title: Adult Nudity and Sexual Activity
+    official_url: https://transparency.meta.com/policies/community-standards/adult-nudity-sexual-activity/
+    verified_on: 2026-10-21
+    key_points:
+      - "Removes visible genitals, anuses, close-ups of buttocks and female nipples (with exceptions such as breastfeeding or protest) and explicit or implied sexual activity, whether real, AI-generated or digital."
+      - "Allowances, sometimes with warning screens or age limits, include breastfeeding, protest, post-mastectomy scarring, medical/health contexts and real-world art."
+      - "Limited to 18+: near-nudity covered only by overlays or objects, imagery focused on intimate body areas, sexual or erotic dancing, simulated sex acts and sexual gestures."
+
+  - id: META-CS-SPAM
+    platform: meta_all
+    category: spam_deception
+    title: Spam
+    official_title: Spam
+    official_url: https://transparency.meta.com/policies/community-standards/spam/
+    verified_on: 2026-10-21
+    key_points:
+      - "Bans content designed to deceive, mislead or overwhelm users to artificially boost viewership."
+      - "Bans buying, selling or trading engagement, giveaways in exchange for engagement, and like/share-gating content."
+      - "Bans deceptive links: cloaking, links delivering something substantially different from what they promise, fake platform features such as fake play buttons, and brand-impersonating landing pages."
+      - "Clearly identified branded content and unpaid cross-promotion are not prohibited."
+
+  - id: META-CS-COMMERCIAL
+    platform: meta_all
+    category: spam_deception
+    title: Prohibited commercial practices (fraud & scams)
+    official_title: Prohibited Commercial Practices
+    official_url: https://transparency.meta.com/policies/community-standards/prohibited-commercial-practices/
+    verified_on: 2026-10-21
+    key_points:
+      - "Prohibits deceptive tactics used to mislead people for financial gain (the former fraud & scams page redirects here)."
+      - "Examples include guaranteed or risk-free investment returns, recruitment-based schemes, money-flip offers, upfront-fee loans, guaranteed-win gambling, fake jobs and false giveaways or grants."
+      - "Celebrity-bait and brand-bait scams falsely using a public figure's likeness or a brand's voice are prohibited."
+      - "Content that condemns, raises awareness of or educates about scams is allowed if it does not promote them."
+
+  - id: META-CS-GRAPHIC
+    platform: meta_all
+    category: violence
+    title: Violent and graphic content
+    official_title: Violent and Graphic Content
+    official_url: https://transparency.meta.com/policies/community-standards/violent-graphic-content/
+    verified_on: 2026-10-21
+    key_points:
+      - "Removes videos of real people showing dismemberment, visible innards, burning or charred bodies or throat-slitting outside medical contexts, and live-streamed executions."
+      - "Removes sadistic remarks on imagery of suffering people or animals."
+      - "Warning screen plus 18+ for violent deaths, life-threatening events, brutality and animal cruelty; 18+ for real fights outside sports, burning or crashing vehicles and certain fictional gore."
+      - "Sharing to condemn abuses or raise awareness is considered."
+
+  - id: META-CS-SUICIDE
+    platform: meta_all
+    category: dangerous_content
+    title: Suicide, self-injury and eating disorders
+    official_title: Suicide and Self-Injury
+    official_url: https://transparency.meta.com/policies/community-standards/suicide-self-injury/
+    verified_on: 2026-10-21
+    key_points:
+      - "Removes content that promotes, encourages, coordinates or instructs suicide, self-injury or eating disorders, including memes and illustrations."
+      - "Removes graphic self-injury imagery, extreme weight-loss instructions and content mocking victims or survivors."
+      - "Body imagery or restrictive-diet instructions paired with eating-disorder terms are removed; in a recovery context they get a warning screen and 18+ limit."
+      - "Discussing personal experience and recovery is allowed but may be limited to adults."
+
+  - id: META-CS-MISINFO
+    platform: meta_all
+    category: misinformation
+    title: Misinformation & AI disclosure
+    official_title: Misinformation
+    official_url: https://transparency.meta.com/policies/community-standards/misinformation/
+    verified_on: 2026-10-21
+    key_points:
+      - "Removes misinformation likely to directly contribute to imminent physical harm or to election/census interference; other misinformation is reduced or given context."
+      - "Removed health misinformation includes false vaccine claims and promoting harmful 'miracle cures' such as bleach or disinfectant."
+      - "Users must use Meta's AI-disclosure tool when posting organic photorealistic video or realistic audio that was digitally created or altered; penalties may apply for not disclosing."
+
+  - id: META-AI-LABEL
+    platform: meta_all
+    category: synthetic_media
+    title: AI-generated content labels
+    official_title: Our Approach to Labeling AI-Generated Content and Manipulated Media
+    official_url: https://about.fb.com/news/2024/04/metas-approach-to-labeling-ai-generated-content-and-manipulated-media/
+    verified_on: 2026-10-21
+    key_points:
+      - "Meta adds 'AI info' labels when it detects industry-standard AI indicators or when people self-disclose AI-generated content."
+      - "Content only edited with AI shows the label in the post menu; AI-generated content shows the label directly."
+      - "A more prominent label may be added when altered media carries a particularly high risk of materially deceiving the public on an important matter."
+      - "Labelled AI content stays up unless it breaks other policies."
+
+  # ---------------------------------------------------------------- Instagram
+  - id: IG-BRANDED-CONTENT
+    platform: instagram
+    category: disclosure
+    title: Branded content policies
+    official_title: Branded Content Policies
+    official_url: https://help.instagram.com/1695974997209192
+    verified_on: 2026-10-21
+    key_points:
+      - "Branded content is content featuring or influenced by a business partner in exchange for something of value, including payment or free gifts."
+      - "It must be posted with the branded content tool, tagging the partner with their prior permission, and creators must make all legally required disclosures."
+      - "Some categories are banned from branded content (e.g. tobacco/vapes, drugs, unsafe supplements, weapons, adult products, payday loans, MLM); others need audience restrictions (alcohol, weight-loss, cosmetic procedures, financial products) or Meta pre-authorisation (gambling, pharmacies, crypto, dating, political)."
+      - "Video format rules: no pre-, mid- or post-roll ads, no banner ads, no title cards in the first three seconds, and interstitial cards no longer than three seconds."
+
+  - id: IG-PAID-PARTNERSHIP
+    platform: instagram
+    category: disclosure
+    title: Paid partnership label
+    official_title: How to use the paid partnership label to tag organic branded content on Instagram
+    official_url: https://help.instagram.com/1109894795810258
+    verified_on: 2026-10-21
+    key_points:
+      - "Organic branded content on Instagram must use the paid partnership label tagging the brand; available for Feed, Stories, Live and Reels."
+      - "If the brand denies the request, the label is removed from the content."
+      - "Creators must follow the Branded Content Policies, Community Standards and Content Monetization Policies; restricted categories require audience restrictions."
+
+  - id: IG-BRANDED-DISCLOSURE
+    platform: instagram
+    category: disclosure
+    title: Branded content disclosure requirement
+    official_title: Get started with branded content on Instagram
+    official_url: https://help.instagram.com/1123581461537025
+    verified_on: 2026-10-21
+    key_points:
+      - "Branded content is content for which the creator was paid in money or anything else of value by a brand, which can include free gifted products or services."
+      - "All branded content must be disclosed with the paid partnership label every time it is posted."
+
+  - id: IG-RECOMMENDATIONS
+    platform: instagram
+    category: recommendations
+    title: Recommendations guidelines (Explore, Reels)
+    official_title: Recommendations on Instagram
+    official_url: https://help.instagram.com/313829416281232
+    verified_on: 2026-10-21
+    key_points:
+      - "Recommendation surfaces (Explore, Reels, suggested posts) apply a stricter standard than the Community Standards."
+      - "Content that may not be recommended includes self-harm or eating-disorder discussion, violence such as fights, sexually suggestive content, and promotion of regulated products including weight-loss products, pharmaceuticals and cosmetic surgery."
+      - "Low-quality content may not be recommended: unoriginal content repurposed with minor edits, long unrelated captions, and content rated false by fact-checkers."
+      - "Accounts may not be recommended if they recently violated guidelines or bought likes."
+
+  - id: IG-MON-CONTENT
+    platform: instagram
+    category: monetization
+    title: Content monetization policies
+    official_title: Instagram Content Monetization Policies
+    official_url: https://help.instagram.com/2635536099905516
+    verified_on: 2026-10-21
+    key_points:
+      - "Monetised content must meet a higher standard than the Community Standards."
+      - "Formats that cannot be monetised include static videos, static image polls, image slideshows, looping videos, text montages and content with embedded ads."
+      - "Prohibited: engagement bait, content rated false by fact-checkers, disproven medical claims, and unoriginal content reposted without meaningful enhancement (commentary, parody, creative editing)."
+      - "Monetisation may be reduced for inflammatory debated social issues, tragedy/conflict, objectionable activity, sexual content, strong language and gore."
+
+  - id: IG-MON-PARTNER
+    platform: instagram
+    category: monetization
+    title: Partner monetization policies
+    official_title: Instagram Partner Monetization Policies
+    official_url: https://help.instagram.com/512371932629820
+    verified_on: 2026-10-21
+    key_points:
+      - "Creators using monetisation tools must follow the Community Standards (including IP and authenticity) and the Content Monetization Policies."
+      - "Posting content flagged as misinformation can cost monetisation eligibility."
+      - "Only authentic engagement can be monetised; artificially boosting followers, views or engagement is prohibited."
+
+  - id: IG-COPYRIGHT
+    platform: instagram
+    category: copyright
+    title: Copyright on Instagram
+    official_title: Copyright
+    official_url: https://help.instagram.com/126382350847838
+    verified_on: 2026-10-21
+    key_points:
+      - "Instagram's copyright help covers what copyright protects, ownership, fair use and other exceptions, and reporting infringement."
+      - "Rights holders can report unauthorised use of their work; reported content may be removed and repeated IP violations have consequences."
+      - "Infringement can occur even when unintentional; laws vary by country."
+
+  # ------------------------------------------------------- India (advisory)
+  - id: IN-ASCI-INFLUENCER
+    platform: india_advisory
+    category: disclosure
+    title: ASCI influencer advertising guidelines (India)
+    official_title: GUIDELINES FOR INFLUENCER ADVERTISING IN DIGITAL MEDIA
+    official_url: https://www.ascionline.in/wp-content/uploads/2023/08/GUIDELINES-FOR-INFLUENCER-ADVERTISING-IN-DIGITAL-MEDIA.pdf
+    verified_on: 2026-10-21
+    key_points:
+      - "Any material connection with an advertiser (money, free products, discounts, trips, family or employment ties) requires a disclosure label even if the review is unbiased."
+      - "Disclosure must be upfront and prominent - not only in a bio, at the end, behind 'more', or buried among hashtags; platform tools are in addition to the influencer's own disclosure."
+      - "For video without accompanying text the label must be overlaid on screen: at least 3 seconds for videos of 15 seconds or less, one-third of the duration for videos up to 2 minutes."
+      - "Accepted labels include Advertisement, Ad, Sponsored, Collaboration, Partnership, Employee, Free gift and Affiliate."
+      - "Health/nutrition and financial influencers need relevant qualifications and must state them upfront."

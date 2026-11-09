@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CreatorShield compliance report — {{ a.id }}</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f8fafc; --brand:#4f46e5;
+          --crit:#b91c1c; --high:#dc2626; --med:#d97706; --low:#2563eb; --info:#64748b; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+         color: var(--ink); background: #fff; margin: 0; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 32px 64px; }
+  header { display:flex; justify-content:space-between; align-items:flex-start; gap:24px;
+           border-bottom: 2px solid var(--ink); padding-bottom: 16px; }
+  .brand { font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand span { color: var(--brand); }
+  h1 { font-size: 24px; margin: 4px 0 0; letter-spacing: -0.02em; }
+  h2 { font-size: 16px; margin: 32px 0 12px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); }
+  .meta { color: var(--muted); font-size: 12px; text-align: right; }
+  .banner { border-radius: 8px; padding: 12px 16px; margin: 20px 0 0; font-weight: 600; }
+  .banner.mock { background:#fef3c7; border:1px solid #f59e0b; color:#78350f; }
+  .banner.warn { background:#fef2f2; border:1px solid #fca5a5; color:#7f1d1d; }
+  .banner.info { background:#f0f9ff; border:1px solid #7dd3fc; color:#0c4a6e; }
+  .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 20px; }
+  .card { border:1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--bg); }
+  .card .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing:.05em; }
+  .card .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .risk-high { color: var(--crit); } .risk-elevated { color: var(--high); }
+  .risk-moderate { color: var(--med); } .risk-low { color: #15803d; }
+  .summary { margin-top: 16px; }
+  .finding { border:1px solid var(--line); border-left: 4px solid var(--info); border-radius: 8px;
+             padding: 14px 16px; margin-bottom: 12px; page-break-inside: avoid; }
+  .finding.critical { border-left-color: var(--crit); } .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--med); } .finding.low { border-left-color: var(--low); }
+  .finding h3 { font-size: 15px; margin: 0 0 6px; }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 8px; }
+  .tag { font-size: 11px; border:1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+         color: var(--muted); background:#fff; }
+  .tag.sev { font-weight:700; text-transform: uppercase; color:#fff; border:none; background: var(--info); }
+  .tag.sev.critical { background: var(--crit);} .tag.sev.high{background:var(--high);}
+  .tag.sev.medium{background:var(--med);} .tag.sev.low{background:var(--low);}
+  .label { font-weight: 600; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  ul.ev { margin: 4px 0 0; padding-left: 18px; }
+  a { color: var(--brand); }
+  .note { font-size: 12px; color: var(--muted); }
+  table { width:100%; border-collapse: collapse; font-size: 12px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align:left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  footer { margin-top: 40px; font-size: 11px; color: var(--muted); border-top:1px solid var(--line); padding-top: 12px; }
+  @media print { .wrap { padding: 0; } a { color: inherit; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand">Creator<span>Shield</span> AI</div>
+      <h1>Pre-publication compliance report</h1>
+    </div>
+    <div class="meta">
+      Report ID {{ a.id }}<br>
+      Generated {{ generated_at }}<br>
+      Policy KB {{ a.policy_kb_version or "—" }}
+    </div>
+  </header>
+
+  {% if a.analysis_mode == "metadata_only" %}
+  <div class="banner warn">METADATA REVIEW ONLY — imported from YouTube. YouTube's API policies do not allow downloading video or audio, so frames, speech and on-screen text were not analysed; only the title, description, tags and (if available) captions were checked.</div>
+  {% elif a.analysis_mode == "caption_thumbnail" %}
+  <div class="banner warn">CAPTION + THUMBNAIL REVIEW ONLY — Instagram did not provide the video file (it withholds files for Reels with licensed audio or copyright flags). Nothing shown or said inside the video was checked.</div>
+  {% elif a.analysis_mode == "cross_checked" %}
+  <div class="banner info">FILE YOU SUPPLIED, CROSS-CHECKED AGAINST THE PUBLISHED POST. The platform copy of the video was not downloaded. Frames, speech, on-screen text and audio are from your file. Song identification and Content ID / Rights Manager were not run.</div>
+  {% endif %}
+  {% if a.extraction and a.extraction.cross_check and a.extraction.cross_check.file_matches_post == "no" %}
+  <div class="banner warn">THE SUPPLIED FILE DOES NOT MATCH THE PUBLISHED POST. Its length or speech differs from what the platform reports, so this report describes the supplied file, which may not be the cut that is live.</div>
+  {% endif %}
+  {% if a.extraction and a.extraction.cross_check %}
+  <h2>Cross-check</h2>
+  {% for line in a.extraction.cross_check.lines %}
+  <p><strong>{{ line.label }}.</strong> {{ line.detail }}</p>
+  {% endfor %}
+  {% endif %}
+  {% if a.mock_mode %}
+  <div class="banner mock">MOCK MODE — AI findings in this report are placeholders produced without calling an AI model. They are not a real assessment.</div>
+  {% elif a.ai_status != "completed" %}
+  <div class="banner warn">AI review was not performed ({{ a.ai_status }}{% if a.ai_status_detail %}: {{ a.ai_status_detail }}{% endif %}). Only rule-based checks are included.</div>
+  {% endif %}
+
+  <div class="grid">
+    <div class="card"><div class="k">Platform</div><div class="v">{{ platform_name }}</div></div>
+    <div class="card"><div class="k">Source</div><div class="v">{{ source_name }}</div></div>
+    <div class="card"><div class="k">Duration</div><div class="v">{% if a.duration_seconds is not none %}{{ "%.1f"|format(a.duration_seconds) }}s{% else %}—{% endif %}</div></div>
+    <div class="card"><div class="k">Heuristic risk</div>
+      <div class="v risk-{{ a.risk_level }}">{{ (a.risk_level or "—")|capitalize }} · {{ a.risk_score }}/100</div></div>
+  </div>
+  <p class="note">The risk indicator is a heuristic summary of the findings below. It is not a probability of removal, demonetization, strikes or account suspension.</p>
+
+  <p class="note">Language: {{ language_name }}{% if a.source_url %} · Post: <a href="{{ a.source_url }}">{{ a.source_url }}</a>{% endif %}</p>
+  {% if a.summary %}<h2>Summary</h2><p class="summary">{{ a.summary }}</p>{% endif %}
+  {% if a.context_assessment %}<p><strong>Context:</strong> {{ a.context_assessment }}</p>{% endif %}
+
+  <h2>Findings ({{ actionable|length }})</h2>
+  {% if not actionable %}<p>No issues were identified by the checks that ran. This does not guarantee compliance.</p>{% endif %}
+  {% for f in actionable %}
+  <div class="finding {{ f.severity }}">
+    <div class="tags">
+      <span class="tag sev {{ f.severity }}">{{ f.severity }}</span>
+      <span class="tag">{{ type_labels[f.finding_type] }}</span>
+      <span class="tag">{{ f.category_label }}</span>
+      <span class="tag">Confidence: {{ f.confidence }}</span>
+      <span class="tag">{{ {"ai": "AI review", "combined": "AI + rule check"}.get(f.source, "Rule-based check") }}</span>
+      {% if f.start_seconds is not none %}<span class="tag">⏱ {{ f.start_seconds|ts }}{% if f.end_seconds is not none and f.end_seconds != f.start_seconds %}–{{ f.end_seconds|ts }}{% endif %}</span>{% endif %}
+      {% if f.requires_human_review %}<span class="tag">Human review required</span>{% endif %}
+      {% if f.rights_status == "covered" %}<span class="tag">Covered by rights ledger · not counted</span>{% elif f.rights_status == "duplicate" %}<span class="tag">Duplicate · not counted</span>{% endif %}
+    </div>
+    <h3>{{ f.title }}</h3>
+    <div>{{ f.explanation }}</div>
+    {% if f.evidence %}
+    <div class="label">Evidence</div>
+    <ul class="ev">{% for e in f.evidence %}<li><code>{{ e.ref_id }}</code>{% if e.timestamp is not none %} @ {{ e.timestamp|ts }}{% endif %} — {{ e.detail }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if f.context_exception %}<div class="label">Context consideration</div><div>{{ f.context_exception }}</div>{% endif %}
+    <div class="label">Suggested action</div><div>{{ f.suggested_action }}</div>
+    <div class="label">Policy reference</div>
+    {% if f.policies %}
+    <ul class="ev">{% for p in f.policies %}<li><code>{{ p.id }}</code> {{ p.title }} — <a href="{{ p.official_url }}">{{ p.official_title }}</a> <span class="note">(verified {{ p.verified_on }})</span></li>{% endfor %}</ul>
+    {% else %}<div class="note">No verified policy reference attached — advisory only.</div>{% endif %}
+    {% if f.rights_note %}<div class="note">{{ f.rights_note }}</div>{% endif %}
+    {% if f.validation_notes %}<div class="note">Validation: {{ f.validation_notes|join(" ") }}</div>{% endif %}
+  </div>
+  {% endfor %}
+
+  {% set prov = a.provenance or {} %}
+  {% if prov.rights %}
+  <h2>Provenance &amp; rights coverage</h2>
+  <p class="note">What the provenance checks noticed (on-screen handles and branding, catalogue matches, identified music, web image matches, YouTube look-alikes) and whether your rights ledger covers it. The ledger is your own record; it is not verified with the other party.</p>
+  <table><tr><th>Status</th><th>What</th><th>When</th><th>Detail</th><th>Ledger record</th></tr>
+  {% for r in prov.rights %}<tr><td><strong>{{ r.status|upper }}</strong></td><td>{{ r.subject }}</td><td>{% if r.start_seconds is not none %}{{ r.start_seconds|ts }}{% else %}—{% endif %}</td><td>{{ r.detail }}</td><td>{% for rec in r.records %}{{ rec.kind_label }}: {{ rec.counterparty }}{% if rec.reference %} ({{ rec.reference }}){% endif %}{% if rec.valid_until %}, until {{ rec.valid_until }}{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  {% if prov.catalogue or prov.music or prov.web %}
+  <p class="note">
+    Catalogue: {{ (prov.catalogue or {}).entries_checked or 0 }} indexed videos compared{% if prov.fingerprint %}; file SHA-256 {{ prov.fingerprint.sha256 }}{% endif %}.
+    Song identification: {{ ((prov.music or {}).status or "not run")|replace("_", " ") }}{% if (prov.music or {}).is_mock %} (MOCK){% endif %}.
+    Web image search: {{ ((prov.web or {}).status or "not run")|replace("_", " ") }}{% if (prov.web or {}).is_mock %} (MOCK){% endif %}.
+    YouTube look-alike search: {{ ((prov.youtube or {}).status or "not run")|replace("_", " ") }}.
+  </p>
+  {% endif %}
+
+  {% if cannot_check %}
+  <h2>Checks not performed</h2>
+  {% for f in cannot_check %}
+  <div class="finding info"><h3>{{ f.title }}</h3><div>{{ f.explanation }}</div></div>
+  {% endfor %}
+  {% endif %}
+
+  <h2>Limitations</h2>
+  <ul>{% for l in a.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+
+  {% if a.extraction and a.extraction.transcript and a.extraction.transcript.segments %}
+  <h2>Transcript (automatic)</h2>
+  <table><tr><th>ID</th><th>Time</th><th>Text</th></tr>
+  {% for s in a.extraction.transcript.segments %}<tr><td>{{ s.id }}</td><td>{{ s.start|ts }}–{{ s.end|ts }}</td><td>{{ s.text }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  {% if a.extraction and a.extraction.ocr %}
+  <h2>On-screen text (OCR)</h2>
+  <table><tr><th>ID</th><th>Time</th><th>Text</th></tr>
+  {% for o in a.extraction.ocr %}<tr><td>{{ o.id }}</td><td>{{ o.timestamp|ts }}</td><td>{{ o.text }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+
+  <footer>
+    AI: {{ a.ai_provider or "—" }} / {{ a.ai_model or "—" }} · STT: {{ (a.extraction.transcript.provider if a.extraction and a.extraction.transcript else "—") }} ·
+    CreatorShield AI provides automated, heuristic guidance only. It is not legal advice, is not affiliated with YouTube, Google or Meta, and cannot guarantee any platform enforcement outcome.
+  </footer>
+</div>
+</body>
+</html>

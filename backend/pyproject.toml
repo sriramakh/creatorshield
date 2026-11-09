@@ -1,0 +1,54 @@
+[project]
+name = "creatorshield-backend"
+version = "0.1.0"
+description = "CreatorShield AI - pre-publish compliance risk analysis API"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "sqlalchemy>=2.0.36",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.14",
+  "redis>=5.2",
+  "rq>=2.0",
+  "python-multipart>=0.0.18",
+  "anthropic>=0.70",
+  "openai>=1.55",
+  "faster-whisper>=1.1",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "cryptography>=50.0.2",
+  "httpx>=0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyYAML",
+    "pillow>=13.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = ["S101", "S603", "S607", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S108"]
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs ffmpeg/whisper model", "live: calls a paid AI API"]
