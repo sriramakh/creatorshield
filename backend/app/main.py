@@ -20,6 +20,9 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    from app.auth import verify_agency_database
+
+    verify_agency_database(settings)
     configure_logging(settings.log_level)
     kb = get_kb(str(settings.policy_kb_path))  # fail fast on an invalid KB
     log.info(
@@ -61,6 +64,9 @@ def create_app() -> FastAPI:
     app.include_router(connections_router)
     app.include_router(provenance_router)
     app.include_router(router)
+    from app.auth import install_auth
+
+    install_auth(app, settings)
     return app
 
 

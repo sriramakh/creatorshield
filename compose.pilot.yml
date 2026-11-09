@@ -1,0 +1,62 @@
+# One compose project per agency. Never share volumes or databases between projects.
+services:
+  gateway:
+    image: caddy:2-alpine
+    ports: ["${PILOT_BIND_IP:-127.0.0.1}:443:443", "${PILOT_BIND_IP:-127.0.0.1}:80:80"]
+    environment:
+      PILOT_DOMAIN: ${PILOT_DOMAIN:?required}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api, frontend]
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: creatorshield
+      POSTGRES_PASSWORD: ${PILOT_DB_PASSWORD:?required}
+      POSTGRES_DB: creatorshield
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creatorshield"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:8-alpine
+  api:
+    build: ./backend
+    env_file: ${PILOT_ENV_FILE:?required}
+    environment: &pilot-env
+      APP_ENV: production
+      AGENCY_ID: ${AGENCY_ID:?required}
+      DATABASE_URL: postgresql+psycopg://creatorshield:${PILOT_DB_PASSWORD}@postgres:5432/creatorshield
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /app/var/storage
+      FRONTEND_URL: https://${PILOT_DOMAIN}
+      API_PUBLIC_URL: https://${PILOT_DOMAIN}
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
+    volumes: ["media:/app/var"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"]
+      interval: 5s
+      retries: 20
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+  worker:
+    build: ./backend
+    env_file: ${PILOT_ENV_FILE:?required}
+    environment: *pilot-env
+    command: python -m app.worker
+    volumes: ["media:/app/var"]
+    depends_on:
+      api: {condition: service_healthy}
+  frontend:
+    build:
+      context: ./frontend
+      args: {NEXT_PUBLIC_API_URL: ""}
+volumes:
+  pgdata:
+  media:
+  caddy_data:
+  caddy_config:

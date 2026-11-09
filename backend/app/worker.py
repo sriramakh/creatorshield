@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 
 def main() -> None:
     settings = get_settings()
+    from app.auth import verify_agency_database
+
+    verify_agency_database(settings)
     configure_logging(settings.log_level)
     with get_sessionmaker()() as db:
         purge_expired(db)

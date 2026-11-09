@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
+    agency_id: str | None = None
+    pilot_username: str | None = None
+    pilot_password_hash: SecretStr | None = None
 
     database_url: str = (
         "postgresql+psycopg://creatorshield:creatorshield_dev@localhost:5432/creatorshield"
