@@ -37,6 +37,13 @@ os.environ.update(
         "GOOGLE_CLIENT_ID": "test-google-client",
         "GOOGLE_CLIENT_SECRET": "test-google-secret",
         "YOUTUBE_CAPTIONS_SCOPE": "false",
+        # Fixed limits so tests do not depend on a developer's backend/.env. The
+        # synthetic clips are short; 60 s keeps the "too long" fixture small.
+        "MAX_DURATION_SECONDS": "60",
+        "MAX_UPLOAD_MB": "200",
+        "IMPORT_MAX_SECONDS": "60",
+        "MIN_FRAMES": "16",
+        "MAX_FRAMES": "16",
     }
 )
 

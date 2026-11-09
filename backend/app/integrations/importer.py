@@ -26,7 +26,7 @@ from app.integrations import youtube as yt
 from app.integrations.common import IntegrationError, get_http_client
 from app.integrations.connections import access_token, hashtags_from_text
 from app.media.ocr import ocr_frames, ocr_image
-from app.media.probe import MediaError, probe
+from app.media.probe import MediaError, media_timeout, probe
 from app.models import Analysis, PlatformConnection
 from app.storage import analysis_prefix, get_storage
 
@@ -99,7 +99,7 @@ def trim(video: Path, seconds: float) -> None:
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=media_timeout(seconds),
         check=False,
     )
     if proc.returncode != 0 or not tmp.exists():

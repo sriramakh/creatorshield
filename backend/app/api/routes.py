@@ -87,6 +87,14 @@ def serialize(analysis: Analysis) -> AnalysisOut:
     return data
 
 
+def too_large_message(max_mb: int) -> str:
+    size = f"{max_mb / 1024:g} GB" if max_mb >= 1024 else f"{max_mb} MB"
+    return (
+        f"File too large (max {size}). Export or compress it at 1080p first, e.g. with "
+        "HandBrake's 'Fast 1080p30' preset; analysis never uses more than 1080p."
+    )
+
+
 @router.get("/health")
 def health(db: DB) -> dict[str, Any]:
     settings = get_settings()
@@ -166,7 +174,7 @@ def create_analysis(
         validate_duration(info, settings.max_duration_seconds, settings.duration_tolerance_seconds)
     except StorageError as exc:
         storage.delete_prefix(prefix)
-        raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB).") from exc
+        raise HTTPException(413, too_large_message(settings.max_upload_mb)) from exc
     except MediaError as exc:
         storage.delete_prefix(prefix)
         raise HTTPException(422, str(exc)) from exc
@@ -286,7 +294,7 @@ def attach_owner_file(
         probe(storage.local_path(incoming))
     except StorageError as exc:
         storage.local_path(incoming).unlink(missing_ok=True)
-        raise HTTPException(413, f"File too large (max {settings.max_upload_mb} MB).") from exc
+        raise HTTPException(413, too_large_message(settings.max_upload_mb)) from exc
     except MediaError as exc:
         storage.local_path(incoming).unlink(missing_ok=True)
         raise HTTPException(422, str(exc)) from exc

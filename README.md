@@ -1,7 +1,7 @@
 # CreatorShield AI — v0.1 (MVP)
 
 Pre-publication policy-risk review for **YouTube Shorts** and **Instagram Reels**.
-Upload a video (≤ 60 s) with its caption and hashtags; CreatorShield transcribes
+Upload a video (up to 30 minutes / 5 GB by default) with its caption and hashtags; CreatorShield transcribes
 speech, samples key frames, reads on-screen text, runs rule-based checks and an
 AI review against a **versioned knowledge base of verified official policy pages**,
 and returns a timestamped report with evidence, citations and suggested fixes.
@@ -53,7 +53,7 @@ says so. `mock` returns a single placeholder AI finding, labelled **MOCK** every
 
 | | What is analysed | Notes |
 |---|---|---|
-| **Instagram** (professional accounts) | Full video, via the official `media_url` | Instagram withholds the file for Reels with licensed audio (incl. its audio library) or copyright flags → caption + thumbnail review, clearly labelled. Attach your own file on that report (or while importing) for a full review cross-checked against the post. Reels > 60 s: first 60 s analysed |
+| **Instagram** (professional accounts) | Full video, via the official `media_url` | Instagram withholds the file for Reels with licensed audio (incl. its audio library) or copyright flags → caption + thumbnail review, clearly labelled. Attach your own file on that report (or while importing) for a full review cross-checked against the post. Reels longer than `IMPORT_MAX_SECONDS` (30 min): the first 30 min are analysed |
 | **YouTube** | Title, description, tags, hashtags; captions if `YOUTUBE_CAPTIONS_SCOPE=true` | YouTube's API policies forbid downloading video/audio → **metadata-only** unless you attach the original file. The file is then reviewed in full and cross-checked against the title, description, duration and captions. The YouTube copy is not downloaded |
 
 No scraping, no `yt-dlp`, no anonymous links: ownership is verified server-side and
@@ -131,7 +131,9 @@ containers (reads `backend/.env`). The compose file is syntax-validated but has
 
 ## Data handling
 
-- Uploads are validated by extension *and* `ffprobe` (container, video stream, duration ≤ 60 s, size ≤ 200 MB).
+- Uploads are validated by extension *and* `ffprobe` (container, video stream, duration ≤ `MAX_DURATION_SECONDS`, default 30 min; size ≤ `MAX_UPLOAD_MB`, default 5 GB).
+- Files above 1080p or 8 Mbps are re-encoded once to an H.264 1080p **working copy** before analysis (measured: 1 min of 4K HEVC in 12 s on an M-series Mac, 304 MB → 22 MB). The original's SHA-256 is recorded for evidence packs and identical-file matching, then the original is deleted. The copy drops container metadata such as GPS location.
+- Longer videos get more frames in the AI review (`FRAMES_PER_MINUTE`, 16–64 frames) and media timeouts that scale with length. Shorts over 3 minutes are flagged as publishing as a regular YouTube video.
 - No accounts, IP addresses or original filenames are stored.
 - Everything for an analysis (video, frames, transcript, report) is deleted after
   `RETENTION_HOURS` (default 72), on demand from the UI/API (`DELETE /api/analyses/{id}`),

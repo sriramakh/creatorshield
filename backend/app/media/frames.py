@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.media.probe import MediaError
+from app.media.probe import MediaError, media_timeout
 
 _PTS_RE = re.compile(r"pts_time:([0-9.]+)")
 
@@ -127,7 +127,7 @@ def sample_frames(
     width: int,
 ) -> list[Frame]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    scenes = detect_scene_changes(video, threshold)
+    scenes = detect_scene_changes(video, threshold, timeout=media_timeout(duration))
     frames: list[Frame] = []
     for i, (ts, reason) in enumerate(choose_timestamps(duration, scenes, interval, max_frames)):
         # Seeking exactly to a scene cut can land on the last frame of the

@@ -7,13 +7,13 @@ import subprocess
 import wave
 from pathlib import Path
 
-from app.media.probe import MediaError
+from app.media.probe import MediaError, media_timeout
 
 _SIL_START = re.compile(r"silence_start: (-?[0-9.]+)")
 _SIL_END = re.compile(r"silence_end: ([0-9.]+)")
 
 
-def extract_audio(video: Path, out: Path) -> None:
+def extract_audio(video: Path, out: Path, timeout: float = 120.0) -> None:
     """16 kHz mono WAV, the input format speech-to-text models expect."""
     proc = subprocess.run(
         [
@@ -36,7 +36,7 @@ def extract_audio(video: Path, out: Path) -> None:
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout,
         check=False,
     )
     if proc.returncode != 0 or not out.exists():
@@ -72,7 +72,7 @@ def sound_intervals(
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=media_timeout(duration),
         check=False,
     )
     if proc.returncode != 0:

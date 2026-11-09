@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import fields
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -25,10 +26,12 @@ from app.db import get_sessionmaker
 from app.integrations.common import IntegrationError
 from app.integrations.importer import prepare_import, prepare_owner_review
 from app.media.extract import run_extraction
-from app.media.probe import MediaError, MediaInfo
+from app.media.probe import MediaError, MediaInfo, probe
+from app.media.working_copy import make_working_copy, needs_working_copy
 from app.models import Analysis
 from app.policies.kb import get_kb
 from app.provenance import pipeline as provenance
+from app.provenance.fingerprint import file_sha256
 from app.schemas import FindingDraft
 from app.storage import analysis_prefix, get_storage
 
@@ -71,6 +74,28 @@ MODE_LIMITATIONS = {
 
 FULL_VIDEO_MODES = {"full_video", "cross_checked"}
 
+# YouTube help 15424877: square or vertical uploads up to 3 minutes are Shorts.
+SHORTS_MAX_SECONDS = 180.0
+
+
+def length_notes(platform: str, duration: float | None) -> list[str]:
+    """Report notes for videos longer than the target format usually allows."""
+    if duration is None or duration <= SHORTS_MAX_SECONDS + 0.5:
+        return []
+    minutes = f"{duration / 60:.1f} minutes"
+    if platform == "youtube_shorts":
+        return [
+            f"This video is {minutes} long. YouTube treats only square or vertical uploads of "
+            "3 minutes or less as Shorts, so it will be published as a regular video. The "
+            "community-guideline, copyright and monetisation checks still apply; Shorts-specific "
+            "guidance in this report may not."
+        ]
+    return [
+        f"This video is {minutes} long. Instagram has been raising the Reels length limit "
+        "gradually and it differs between accounts; check that the Reels composer accepts "
+        "this length before you plan around it."
+    ]
+
 
 def get_provider(settings: Settings) -> AnalysisProvider:
     if settings.ai_provider == "anthropic":
@@ -97,6 +122,52 @@ def get_provider(settings: Settings) -> AnalysisProvider:
     from app.analysis.providers.mock import MockProvider
 
     return MockProvider()
+
+
+_MEDIA_FIELDS = {f.name for f in fields(MediaInfo)}
+
+
+def _media_info(stored: dict[str, Any]) -> MediaInfo:
+    return MediaInfo(**{k: v for k, v in stored.items() if k in _MEDIA_FIELDS})
+
+
+def _prepare_working_copy(
+    db: Session, analysis: Analysis, info: MediaInfo, settings: Settings
+) -> tuple[MediaInfo, str | None]:
+    """Hash the original, then re-encode a large file once. Safe to call on reruns."""
+    storage = get_storage()
+    assert analysis.storage_key is not None
+    path = storage.local_path(analysis.storage_key)
+    meta = dict(analysis.media_info or {})
+    # Evidence packs and identical-file matching refer to the file the creator
+    # supplied, not to the working copy.
+    meta.setdefault("original_sha256", file_sha256(path))
+    if meta.get("working_copy") or not needs_working_copy(info, settings):
+        analysis.media_info = meta
+        db.commit()
+        return info, None
+    _set_stage(db, analysis, "optimizing_video", 8)
+    key = f"{analysis_prefix(analysis.id)}/video-work.mp4"
+    try:
+        make_working_copy(path, storage.local_path(key), info, settings)
+        working = probe(storage.local_path(key))
+    except MediaError as exc:
+        storage.local_path(key).unlink(missing_ok=True)
+        analysis.media_info = meta
+        db.commit()
+        return info, f"{exc} The video was analysed at its original size, which is slower."
+    original = {k: meta.get(k) for k in ("width", "height", "video_codec", "fps", "bit_rate")}
+    path.unlink(missing_ok=True)
+    analysis.storage_key = key
+    analysis.content_type = "video/mp4"
+    analysis.media_info = {
+        **working.to_dict(),
+        "original_sha256": meta["original_sha256"],
+        "original": original,
+        "working_copy": True,
+    }
+    db.commit()
+    return working, None
 
 
 def _set_stage(db: Session, analysis: Analysis, stage: str, progress: int) -> None:
@@ -169,9 +240,12 @@ def _run(
         if not analysis.storage_key or not storage.exists(analysis.storage_key):
             fail("The video file is no longer available.")
             return
-        info = MediaInfo(**analysis.media_info) if analysis.media_info else None
+        info = _media_info(analysis.media_info) if analysis.media_info else None
         if info is None:
             raise RuntimeError("media_info missing")
+        info, copy_note = _prepare_working_copy(db, analysis, info, settings)
+        if copy_note:
+            import_notes.append(copy_note)
         _set_stage(db, analysis, "extracting", 10)
         try:
             extraction = run_extraction(
@@ -284,6 +358,7 @@ def _run(
     provenance.persist(db, analysis, drafts)
 
     limitations = list(MODE_LIMITATIONS.get(analysis.analysis_mode, []))
+    limitations.extend(length_notes(analysis.platform, analysis.duration_seconds))
     limitations.extend(STANDARD_LIMITATIONS)
     limitations.extend(import_notes)
     limitations.extend(extraction.get("warnings", []))

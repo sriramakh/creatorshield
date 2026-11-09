@@ -1,13 +1,14 @@
 """Pluggable speech-to-text.
 
-``faster_whisper`` runs locally (CTranslate2, int8 on CPU - fine on an M4 for
-60-second clips). ``openai`` uses the hosted transcription API (paid). The
+``faster_whisper`` runs locally (CTranslate2, int8 on CPU; time grows with the
+length of speech). ``openai`` uses the hosted transcription API (paid). The
 local model is loaded once per worker process and reused.
 """
 
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
 import wave
 from dataclasses import asdict, dataclass
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from app.config import Settings
+from app.media.audio import wav_duration
+from app.media.probe import MediaError, media_timeout
 
 log = logging.getLogger(__name__)
 
@@ -115,14 +118,43 @@ class OpenAITranscriber:
         from openai import OpenAI
 
         client = OpenAI(api_key=self.api_key)
-        with audio.open("rb") as fh:
-            result = client.audio.transcriptions.create(
-                model=self.model,
-                file=fh,
-                language=language,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-            )
+        # The hosted API takes files up to 25 MB; 16 kHz PCM passes that at about
+        # 13 minutes. 32 kbps mono MP3 keeps 20 minutes under 5 MB.
+        upload = audio.with_suffix(".mp3")
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(audio),
+                "-ac",
+                "1",
+                "-b:a",
+                "32k",
+                str(upload),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=media_timeout(wav_duration(audio)),
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise MediaError("Could not prepare the audio for transcription.")
+        try:
+            with upload.open("rb") as fh:
+                result = client.audio.transcriptions.create(
+                    model=self.model,
+                    file=fh,
+                    language=language,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"],
+                )
+        finally:
+            upload.unlink(missing_ok=True)
         segments = [
             Segment(
                 id=f"T{i + 1}", start=round(s.start, 2), end=round(s.end, 2), text=s.text.strip()

@@ -43,6 +43,15 @@ def _parse_rate(rate: str | None) -> float | None:
         return None
 
 
+def media_timeout(seconds: float, base: float = 120.0) -> float:
+    """Subprocess timeout for a pass over ``seconds`` of media.
+
+    FFmpeg decodes well above real time; allowing real time on top of ``base``
+    covers slow 4K/HEVC decodes without letting a stuck process run forever.
+    """
+    return base + max(0.0, seconds)
+
+
 def probe(path: Path, timeout: float = 30.0) -> MediaInfo:
     try:
         proc = subprocess.run(

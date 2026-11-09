@@ -28,8 +28,11 @@ Redis ──► RQ SimpleWorker (backend/app/worker.py)
 ## Request / job flow
 
 1. `POST /api/analyses` streams the file to storage (size-capped), probes it with
-   ffprobe (container whitelist, video stream, duration ≤ 60 s + 0.5 s tolerance),
+   ffprobe (container whitelist, video stream, duration ≤ `MAX_DURATION_SECONDS` (30 min) + 0.5 s tolerance),
    stores metadata, and enqueues `process_analysis(id)`. Returns `202`.
+   Before extraction the worker hashes the original (`media_info.original_sha256`) and, for files above
+   1080p or 8 Mbps, makes an H.264 1080p working copy (`app/media/working_copy.py`, stage `optimizing_video`),
+   deletes the original and analyses the copy. If encoding fails it falls back to the original with a note.
 2. The worker updates `stage`/`progress` as it goes; the UI polls `GET /api/analyses/{id}`.
 3. Extraction output (transcript segments `T#`, frames `F#`, OCR `O#`, audio intervals)
    is stored as JSON on the analysis; frame JPEGs stay in storage for the UI.
@@ -58,7 +61,7 @@ POST /api/analyses/import {connection_id, url|media_id}
 | `youtube.py` | Google OAuth (code + PKCE, offline), refresh, revoke; Data API v3 channels / playlistItems / videos / captions; SRT + ISO-8601 parsing |
 | `urls.py` | Strict link parsing (host allow-lists; YouTube 11-char IDs; IG shortcodes) |
 | `connections.py` | Connect/refresh/disconnect, media listing, ownership-checked resolution |
-| `importer.py` | Worker side: IG download (HTTPS + CDN host allow-list re-checked on every redirect, size cap, trim to 60 s) or caption+thumbnail fallback; YT metadata + captions |
+| `importer.py` | Worker side: IG download (HTTPS + CDN host allow-list re-checked on every redirect, size cap, trim to `IMPORT_MAX_SECONDS`, 30 min) or caption+thumbnail fallback; YT metadata + captions |
 
 Analysis modes: `full_video` (upload or IG file), `caption_thumbnail` (IG withheld the file),
 `metadata_only` (YouTube), `cross_checked` (the creator attaches their own file to an imported

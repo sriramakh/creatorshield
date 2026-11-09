@@ -27,7 +27,7 @@ from typing import Any
 
 import numpy as np
 
-from app.media.probe import MediaError
+from app.media.probe import MediaError, media_timeout
 
 FRAME_FPS = 2.0
 FRAME_STEP = 1.0 / FRAME_FPS
@@ -43,6 +43,10 @@ VIDEO_MIN_ALIGNED = 6  # aligned frames (3 s at 2 fps)
 AUDIO_BER_MAX = 0.35  # bit error rate; unrelated audio sits near 0.5
 AUDIO_MIN_ITEMS = 24  # ~3 s
 AUDIO_WINDOW = 16
+AUDIO_CHUNK = 240  # ~30 s of query audio aligned at a time on long files
+# Frame pairs compared per block. Keeps a 20-minute vs 20-minute comparison in
+# tens of MB instead of over a GB.
+_PAIR_BLOCK = 1 << 19
 
 # A frame hash is "<value hex>:<edge-mask hex>". The mask marks comparisons with a
 # real brightness edge; flat areas (plain backgrounds) carry no information and
@@ -120,7 +124,7 @@ def video_hashes(video: Path, max_seconds: float) -> list[FrameHash | None]:
             "-",
         ],
         capture_output=True,
-        timeout=300,
+        timeout=media_timeout(max_seconds, base=300.0),
         check=False,
     )
     if proc.returncode != 0:
@@ -135,7 +139,7 @@ def audio_fingerprint(video: Path, max_seconds: float, fpcalc: str = "fpcalc") -
             [fpcalc, "-raw", "-json", "-length", str(int(max_seconds)), str(video)],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=media_timeout(max_seconds, base=300.0),
             check=False,
         )
     except FileNotFoundError as exc:
@@ -152,12 +156,17 @@ def audio_fingerprint(video: Path, max_seconds: float, fpcalc: str = "fpcalc") -
 
 
 def compute_fingerprint(
-    video: Path, duration: float, max_seconds: float, fpcalc: str = "fpcalc"
+    video: Path,
+    duration: float,
+    max_seconds: float,
+    fpcalc: str = "fpcalc",
+    sha256: str | None = None,
 ) -> Fingerprint:
+    """``sha256`` is the original file's hash when ``video`` is a working copy."""
     limit = min(duration, max_seconds)
     return Fingerprint(
         duration_seconds=round(duration, 2),
-        sha256=file_sha256(video),
+        sha256=sha256 or file_sha256(video),
         frame_hashes=video_hashes(video, limit),
         audio_fp=audio_fingerprint(video, limit, fpcalc),
     )
@@ -224,11 +233,14 @@ def frame_distance_matrix(
     """
     qv, qm, q_ok = _as_arrays(query)
     rv, rm, r_ok = _as_arrays(ref)
-    both = qm[:, None, :] & rm[None, :, :]
-    either = qm[:, None, :] | rm[None, :, :]
-    flipped = _pop((qv[:, None, :] ^ rv[None, :, :]) & both)
-    only_one = _pop(qm[:, None, :] ^ rm[None, :, :])
-    dist = (flipped + 0.5 * only_one) / np.maximum(_pop(either), 1)
+    dist = np.ones((len(query), len(ref)), dtype=np.float32)
+    rows = max(1, _PAIR_BLOCK // max(1, len(ref)))
+    for a in range(0, len(query), rows):
+        bv, bm = qv[a : a + rows, None, :], qm[a : a + rows, None, :]
+        both = bm & rm[None, :, :]
+        flipped = _pop((bv ^ rv[None, :, :]) & both)
+        only_one = _pop(bm ^ rm[None, :, :])
+        dist[a : a + rows] = (flipped + 0.5 * only_one) / np.maximum(_pop(bm | rm[None, :, :]), 1)
     dist[~q_ok, :] = 1.0
     dist[:, ~r_ok] = 1.0
     return dist, q_ok, r_ok
@@ -246,10 +258,9 @@ def _video_segment(
     if qi.size == 0:
         return None
     # Vote for the time offset, weighting closer frames more.
-    weights: dict[int, float] = {}
-    for q, r in zip(qi.tolist(), ri.tolist(), strict=True):
-        weights[r - q] = weights.get(r - q, 0.0) + 1.0 - float(dist[q, r]) / VIDEO_DISTANCE_MAX
-    best_offset = max(weights, key=lambda k: weights[k])
+    shift = len(query) - 1  # offsets start at -(len(query) - 1)
+    votes = np.bincount(ri - qi + shift, weights=1.0 - dist[qi, ri] / VIDEO_DISTANCE_MAX)
+    best_offset = int(np.argmax(votes)) - shift
     aligned = np.abs((ri - qi) - best_offset) <= 1
     matched_q = np.unique(qi[aligned])
     if matched_q.size < VIDEO_MIN_ALIGNED:
@@ -286,6 +297,54 @@ def _informative(values: np.ndarray) -> np.ndarray:
     return mask
 
 
+def _audio_offsets(
+    q: np.ndarray, q_mask: np.ndarray, r: np.ndarray, r_mask: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bit error rate of ``q`` at every offset across ``r`` (index k is offset k - len(q) + 1)."""
+    n = q.size
+    pad = np.zeros(n - 1, dtype=np.uint32)
+    no = np.zeros(n - 1, dtype=bool)
+    windows = np.lib.stride_tricks.sliding_window_view(np.concatenate([pad, r, pad]), n)
+    window_ok = np.lib.stride_tricks.sliding_window_view(np.concatenate([no, r_mask, no]), n)
+    window_ok = window_ok & q_mask[None, :]
+    errors = np.where(window_ok, np.bitwise_count(windows ^ q[None, :]), 0).sum(axis=1)
+    overlap = window_ok.sum(axis=1)
+    ber = np.where(overlap >= AUDIO_MIN_ITEMS, errors / np.maximum(overlap, 1) / 32, 1.0)
+    return ber, overlap
+
+
+def _best_audio_offset(
+    q: np.ndarray, q_mask: np.ndarray, r: np.ndarray, r_mask: np.ndarray
+) -> int | None:
+    """Offset (ref index - query index) where the query lines up with the reference.
+
+    Short queries are slid across the reference whole. Long ones are split into
+    ~30 s chunks that each find their own best offset and vote: memory stays small,
+    and a clip reused inside a longer video still lines up even though the rest of
+    the video does not.
+    """
+    n = q.size
+    limit = AUDIO_BER_MAX + 0.05
+    if n <= 2 * AUDIO_CHUNK:
+        ber, _ = _audio_offsets(q, q_mask, r, r_mask)
+        best = int(np.argmin(ber))
+        return best - (n - 1) if ber[best] <= limit else None
+    votes: dict[int, float] = {}
+    for start in range(0, n, AUDIO_CHUNK):
+        chunk, mask = q[start : start + AUDIO_CHUNK], q_mask[start : start + AUDIO_CHUNK]
+        if mask.sum() < AUDIO_MIN_ITEMS:
+            continue
+        ber, overlap = _audio_offsets(chunk, mask, r, r_mask)
+        best = int(np.argmin(ber))
+        if ber[best] <= limit:
+            offset = best - (chunk.size - 1) - start
+            votes[offset] = votes.get(offset, 0.0) + float(overlap[best]) * (1 - float(ber[best]))
+    if not votes:
+        return None
+    # Re-encodes can shift the hop grid by one item; pool neighbouring offsets.
+    return max(votes, key=lambda o: votes[o] + 0.5 * (votes.get(o - 1, 0) + votes.get(o + 1, 0)))
+
+
 def match_audio(query: list[int], ref: list[int], step: float = AUDIO_STEP) -> Segment | None:
     if len(query) < AUDIO_MIN_ITEMS or len(ref) < AUDIO_MIN_ITEMS:
         return None
@@ -294,27 +353,17 @@ def match_audio(query: list[int], ref: list[int], step: float = AUDIO_STEP) -> S
     q_mask = _informative(q)
     if q_mask.sum() < AUDIO_MIN_ITEMS:
         return None
+    r_mask = _informative(r)
+    offset = _best_audio_offset(q, q_mask, r, r_mask)
+    if offset is None:
+        return None
     n, m = q.size, r.size
-    # Pad the reference so every offset (query sliding fully past it) is a window.
-    pad = np.zeros(n - 1, dtype=np.uint32)
-    padded = np.concatenate([pad, r, pad])
-    valid = np.concatenate(
-        [np.zeros(n - 1, dtype=bool), _informative(r), np.zeros(n - 1, dtype=bool)]
-    )
-    windows = np.lib.stride_tricks.sliding_window_view(padded, n)
-    window_ok = np.lib.stride_tricks.sliding_window_view(valid, n) & q_mask[None, :]
-    errors = np.bitwise_count(windows ^ q[None, :]).astype(np.float32)
-    overlap = window_ok.sum(axis=1)
-    usable = overlap >= AUDIO_MIN_ITEMS
-    if not usable.any():
-        return None
-    ber = np.where(usable, (errors * window_ok).sum(axis=1) / np.maximum(overlap, 1) / 32, 1.0)
-    best = int(np.argmin(ber))
-    if ber[best] > AUDIO_BER_MAX + 0.05:
-        return None
-    offset = best - (n - 1)  # ref index = query index + offset
-    per_item = errors[best] / 32
-    ok = window_ok[best]
+    # Per-item errors along the chosen alignment (ref index = query index + offset).
+    ref_idx = np.arange(n) + offset
+    inside = (ref_idx >= 0) & (ref_idx < m)
+    aligned = r[np.clip(ref_idx, 0, m - 1)]
+    ok = inside & q_mask & r_mask[np.clip(ref_idx, 0, m - 1)]
+    per_item = np.bitwise_count(q ^ aligned).astype(np.float32) / 32
     kernel = np.ones(AUDIO_WINDOW, dtype=np.float32)
     local_err = np.convolve(np.where(ok, per_item, 0), kernel, "same")
     local_n = np.convolve(ok.astype(np.float32), kernel, "same")

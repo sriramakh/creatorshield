@@ -7,6 +7,7 @@ import { api, ApiError, type Analysis, type Finding, type FindingType, type Seve
 import { OwnerFileForm } from "../OwnerFileForm";
 import {
   fmtBytes,
+  fmtLength,
   fmtDate,
   fmtTime,
   LANGUAGE_LABEL,
@@ -72,6 +73,7 @@ export function AnalysisView() {
 const STEPS = [
   { key: "queued", label: "Queued" },
   { key: "fetching_source", label: "Fetch from platform" },
+  { key: "optimizing_video", label: "Make a smaller working copy (large files)" },
   { key: "extracting_audio", label: "Extract audio", match: ["extracting", "extracting_audio"] },
   { key: "transcribing", label: "Transcribe speech" },
   { key: "sampling_frames", label: "Sample key frames" },
@@ -117,7 +119,7 @@ function ProcessingView({ analysis }: { analysis: Analysis }) {
           })}
         </ol>
         <p className="mt-6 text-xs text-slate-500">
-          Typically under a minute for a 60-second clip. The first run downloads the speech model and takes longer.
+          About a minute for a 1-minute clip; longer videos take a few minutes. The first run downloads the speech model and takes longer.
         </p>
       </Card>
     </div>
@@ -241,8 +243,15 @@ function Header({ analysis, actions }: { analysis: Analysis; actions?: React.Rea
             </a>
           )}
           <span>{LANGUAGE_LABEL[analysis.language]}</span>
-          {analysis.duration_seconds != null && <span>{analysis.duration_seconds.toFixed(1)}s</span>}
-          {analysis.media_info && <span>{analysis.media_info.width}×{analysis.media_info.height}</span>}
+          {analysis.duration_seconds != null && <span>{fmtLength(analysis.duration_seconds)}</span>}
+          {analysis.media_info?.original ? (
+            <span title="Large files are analysed from a smaller working copy">
+              {analysis.media_info.original.width}×{analysis.media_info.original.height}, analysed at{" "}
+              {analysis.media_info.width}×{analysis.media_info.height}
+            </span>
+          ) : (
+            analysis.media_info && <span>{analysis.media_info.width}×{analysis.media_info.height}</span>
+          )}
           {analysis.size_bytes > 0 && <span>{fmtBytes(analysis.size_bytes)}</span>}
           <span>Created {fmtDate(analysis.created_at)}</span>
         </div>

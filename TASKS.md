@@ -55,7 +55,7 @@ Acceptance criteria and status:
 5. Music: live-test the AudD integration; add ACRCloud as a second provider; ISRC → label lookup for ledger matching
 6. PDF export; shareable report links with expiry
 7. Policy KB refresh job (re-fetch pages, diff, flag changed rules for human re-verification)
-8. Longer videos (YouTube Shorts up to 3 min), TikTok/Facebook targets
+8. ~~Longer videos~~ done (30 min / 5 GB default with a 1080p working copy, see DECISIONS #40–41). Still open: resumable/chunked uploads for multi-GB files on slow connections; TikTok/Facebook targets
 9. S3-compatible storage backend; production deployment (managed Postgres/Redis, worker autoscaling)
 10. Agency features: workspaces, batch uploads, reviewer sign-off workflow on "human review" findings
 11. Catalogue at scale: index past posts straight from connected accounts' exports; LSH index instead of a linear scan (fine to ~2,000 entries today)

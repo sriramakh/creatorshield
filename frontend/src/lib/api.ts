@@ -128,6 +128,10 @@ export interface Analysis extends AnalysisSummary {
     video_codec: string;
     has_audio: boolean;
     audio_codec: string | null;
+    // Set when a large upload was analysed from a smaller working copy.
+    working_copy?: boolean;
+    original_sha256?: string;
+    original?: { width: number; height: number; video_codec: string; fps: number | null; bit_rate: number | null };
   } | null;
   extraction: Extraction | null;
   ai_provider: string | null;

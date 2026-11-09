@@ -11,7 +11,7 @@ from app.config import Settings
 from app.media.audio import extract_audio, sound_intervals, subtract_intervals
 from app.media.frames import sample_frames
 from app.media.ocr import ocr_frames
-from app.media.probe import MediaInfo
+from app.media.probe import MediaInfo, media_timeout
 from app.media.transcribe import get_transcriber
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def run_extraction(
     if info.has_audio:
         stage("extracting_audio", 15)
         wav = work_dir / "audio.wav"
-        extract_audio(video, wav)
+        extract_audio(video, wav, timeout=media_timeout(info.duration_seconds))
         sound = sound_intervals(wav, info.duration_seconds)
         stage("transcribing", 25)
         try:
@@ -71,7 +71,7 @@ def run_extraction(
         info.duration_seconds,
         threshold=settings.scene_threshold,
         interval=settings.uniform_frame_interval_seconds,
-        max_frames=settings.max_frames,
+        max_frames=settings.frame_budget(info.duration_seconds),
         width=settings.frame_width,
     )
     result["frames"] = [

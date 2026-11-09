@@ -65,6 +65,7 @@ export const STAGE_LABEL: Record<string, string> = {
   queued: "Queued",
   awaiting_file: "Waiting for your file",
   fetching_source: "Fetching from platform",
+  optimizing_video: "Making a smaller working copy",
   extracting: "Preparing video",
   extracting_audio: "Extracting audio",
   transcribing: "Transcribing speech",
@@ -88,7 +89,17 @@ export function fmtTime(seconds: number | null | undefined): string {
 export function fmtBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/** 42.3s under a minute, otherwise m:ss (or h:mm:ss). */
+export function fmtLength(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const s = Math.round(seconds);
+  const hms = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
+  const [h, m, sec] = hms.map((v) => String(v).padStart(2, "0"));
+  return s >= 3600 ? `${+h}:${m}:${sec}` : `${+m}:${sec}`;
 }
 
 export function fmtDate(iso: string): string {

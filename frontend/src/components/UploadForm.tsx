@@ -4,14 +4,22 @@ import { SponsorshipFields, EMPTY_SPONSORSHIP } from "./SponsorshipFields";
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { uploadAnalysis, type Language, type Platform } from "@/lib/api";
+import { api, uploadAnalysis, type Language, type Platform } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { CheckIcon, UploadIcon } from "./icons";
 import { Banner, Card } from "./ui";
 
 const ACCEPT = ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm";
-const MAX_SECONDS = 60;
-const MAX_MB = 200;
+// Defaults until /api/config answers; the server enforces its own limits either way.
+const DEFAULT_LIMITS = { seconds: 1800, mb: 5120 };
+
+function fmtLimitDuration(seconds: number) {
+  return seconds >= 60 ? `${+(seconds / 60).toFixed(1)} min` : `${seconds}s`;
+}
+
+function fmtLimitSize(mb: number) {
+  return mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
 
 interface LocalInfo {
   duration: number;
@@ -28,6 +36,7 @@ export function UploadForm() {
   const [platform, setPlatform] = useState<Platform>("youtube_shorts");
   const [language, setLanguage] = useState<Language>("en");
   const [caption, setCaption] = useState("");
+  const [limits, setLimits] = useState(DEFAULT_LIMITS);
   const [hashtags, setHashtags] = useState("");
   const [clientLabel, setClientLabel] = useState("");
   const [sponsorship, setSponsorship] = useState(EMPTY_SPONSORSHIP);
@@ -48,6 +57,13 @@ export function UploadForm() {
     setPreview(previewRef.current);
   }
 
+  useEffect(() => {
+    api
+      .config()
+      .then((c) => setLimits({ seconds: c.max_duration_seconds, mb: c.max_upload_mb }))
+      .catch(() => {});
+  }, []);
+
   const hashtagCount = hashtags.split(/[\s,]+/).filter((t) => t.replace(/^#/, "")).length;
 
   function pick(f: File | undefined) {
@@ -59,8 +75,11 @@ export function UploadForm() {
       setError("Only MP4, MOV and WebM videos are supported.");
       return;
     }
-    if (f.size > MAX_MB * 1024 * 1024) {
-      setError(`File is larger than ${MAX_MB} MB.`);
+    if (f.size > limits.mb * 1024 * 1024) {
+      setError(
+        `File is larger than ${fmtLimitSize(limits.mb)}. Export or compress it at 1080p first ` +
+          "(e.g. HandBrake's \"Fast 1080p30\" preset); analysis never uses more than 1080p.",
+      );
       return;
     }
     setFile(f);
@@ -73,7 +92,7 @@ export function UploadForm() {
     pick(e.dataTransfer.files?.[0]);
   }
 
-  const tooLong = info != null && info.duration > MAX_SECONDS + 0.5;
+  const tooLong = info != null && info.duration > limits.seconds + 0.5;
   const canSubmit = file && authorized && !tooLong && progress === null;
 
   async function submit() {
@@ -132,7 +151,7 @@ export function UploadForm() {
                 <UploadIcon className="h-5 w-5" />
               </span>
               <span className="mt-3 text-sm font-semibold text-slate-800">Drop a video or click to browse</span>
-              <span className="mt-1 text-xs text-slate-500">MP4, MOV or WebM · up to {MAX_SECONDS}s · max {MAX_MB} MB</span>
+              <span className="mt-1 text-xs text-slate-500">MP4, MOV or WebM · up to {fmtLimitDuration(limits.seconds)} · max {fmtLimitSize(limits.mb)}</span>
             </button>
           ) : (
             <div className="mt-3 space-y-3">
@@ -161,7 +180,7 @@ export function UploadForm() {
                 <dt className="text-slate-500">Resolution</dt>
                 <dd className="text-right font-medium">{info ? `${info.width}×${info.height}` : "…"}</dd>
               </dl>
-              {tooLong && <p className="text-xs font-medium text-red-600">This video is longer than {MAX_SECONDS} seconds. Trim it before uploading.</p>}
+              {tooLong && <p className="text-xs font-medium text-red-600">This video is longer than {fmtLimitDuration(limits.seconds)}. Trim it before uploading.</p>}
               <button
                 type="button"
                 onClick={() => {

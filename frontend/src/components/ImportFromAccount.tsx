@@ -253,7 +253,7 @@ export function ImportFromAccount() {
           <p className="mt-1 text-[11px] text-slate-500">
             Optional, and the way to review what is actually in the video. Use your export from YouTube Studio or
             Instagram&apos;s download-your-information tool. The platform copy is not downloaded, and songs are not identified.
-            Files longer than 60 seconds are reviewed from the start.
+            Files longer than 30 minutes are reviewed from the start.
           </p>
         </div>
 

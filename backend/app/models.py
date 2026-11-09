@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -55,7 +56,7 @@ class Analysis(Base):
 
     file_ext: Mapped[str] = mapped_column(String(8))
     content_type: Mapped[str] = mapped_column(String(64))
-    size_bytes: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
     storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     media_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 

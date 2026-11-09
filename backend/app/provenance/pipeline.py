@@ -74,6 +74,7 @@ def run_stage(
                 analysis.duration_seconds or 0.0,
                 settings.catalogue_max_seconds,
                 settings.fpcalc_cmd,
+                sha256=(analysis.media_info or {}).get("original_sha256"),
             )
             row = catalogue.save_for_analysis(db, analysis, fp, settings)
             prov["fingerprint"] = {

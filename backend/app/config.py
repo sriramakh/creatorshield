@@ -6,6 +6,7 @@ never returned by any API endpoint - `public_summary()` exposes only booleans.
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -36,7 +37,8 @@ class Settings(BaseSettings):
     # When false, jobs run inline in the API process (used by tests).
     use_job_queue: bool = True
     queue_name: str = "creatorshield"
-    job_timeout_seconds: int = 900
+    # A 30-minute 4K video can spend ~15 min on its working copy alone (software decode).
+    job_timeout_seconds: int = 5400
 
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
@@ -44,10 +46,16 @@ class Settings(BaseSettings):
     storage_backend: Literal["local"] = "local"
     storage_dir: Path = BACKEND_DIR / "var" / "storage"
 
-    # Upload limits
-    max_upload_mb: int = 200
-    max_duration_seconds: float = 60.0
-    # Allow container rounding (e.g. 60.02s) without rejecting a 60s clip.
+    # Upload limits. 30 minutes covers 3-minute Shorts, 20-minute Reels and long cuts;
+    # 5 GB fits 30 minutes of typical phone 4K. Both are configurable per deployment.
+    max_upload_mb: int = 5120
+    max_duration_seconds: float = 1800.0
+    # Working copy: files above these are re-encoded once (H.264, short side <= 1080,
+    # <= 30 fps, metadata stripped) before analysis, and the original is deleted.
+    # Every later pass then reads a small file. 0 disables.
+    working_copy_max_short_side: int = 1080
+    working_copy_max_bitrate_kbps: int = 8000
+    # Allow container rounding (e.g. 60.02s) without rejecting a clip at the limit.
     duration_tolerance_seconds: float = 0.5
 
     # Retention
@@ -63,8 +71,11 @@ class Settings(BaseSettings):
     ocr_enabled: bool = True
     tesseract_cmd: str = "tesseract"
 
-    # Frame sampling
-    max_frames: int = 16
+    # Frame sampling. The frame budget grows with length (frames_per_minute) between
+    # min_frames and max_frames; each frame is one image in the AI review.
+    min_frames: int = 16
+    max_frames: int = 64
+    frames_per_minute: float = 4.0
     scene_threshold: float = 0.25
     uniform_frame_interval_seconds: float = 4.0
     frame_width: int = 768
@@ -118,14 +129,14 @@ class Settings(BaseSettings):
     youtube_max_retention_hours: int = 720
 
     # Imported media
-    import_max_seconds: float = 60.0  # longer imported videos are trimmed to this
+    import_max_seconds: float = 1800.0  # longer imported videos are trimmed to this
     import_media_hosts: list[str] = ["cdninstagram.com", "fbcdn.net"]
 
     # ---- Provenance & rights ---------------------------------------------------
     # Catalogue fingerprints (frame hashes + audio fingerprint, no media) are kept
     # after an analysis expires so later videos can be matched against them.
     catalogue_retention_days: int = 365
-    catalogue_max_seconds: float = 900.0  # longest file accepted for catalogue indexing
+    catalogue_max_seconds: float = 3600.0  # longest file accepted for catalogue indexing
     catalogue_scan_limit: int = 2000  # newest fingerprints compared per video
     fpcalc_cmd: str = "fpcalc"
     rights_proof_max_mb: int = 10
@@ -169,6 +180,11 @@ class Settings(BaseSettings):
                 self.google_vision_api_key and self.google_vision_api_key.get_secret_value()
             )
         return self.web_detection_provider == "mock"
+
+    def frame_budget(self, duration_seconds: float) -> int:
+        """Frames sampled for review: frames_per_minute, kept within min/max_frames."""
+        wanted = math.ceil(max(0.0, duration_seconds) / 60 * self.frames_per_minute)
+        return max(self.min_frames, min(self.max_frames, wanted))
 
     @property
     def max_upload_bytes(self) -> int:

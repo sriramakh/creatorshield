@@ -140,7 +140,7 @@ function EmptyState() {
       </span>
       <h2 className="mt-4 text-base font-semibold">No analyses yet</h2>
       <p className="mt-1 max-w-sm text-sm text-slate-500">
-        Upload a Short or Reel (up to 60 seconds) to get a timestamped policy-risk report with official policy references.
+        Upload a Short or Reel (up to 30 minutes) to get a timestamped policy-risk report with official policy references.
       </p>
       <Link
         href="/analyses/new"
