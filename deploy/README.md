@@ -30,7 +30,9 @@ Before customer use, test real HTTPS browser login, uploads, report/video/proof 
 
 Authentication verifies uncached headers in worker threads (at most two concurrently),
 with at most 20 uncached attempts per minute per API process. Excess attempts return 429.
-Successful headers are cached for five minutes, with at most 128 HMAC keys in memory;
+Concurrent requests carrying the same uncached header share one verification, so a page
+load after the cache lapses does not exhaust the limit. Successful headers are cached
+until five minutes without use, with at most 128 HMAC keys in memory;
 raw headers and passwords are not cached. Caches are local to each application instance
 and are cleared on restart/credential rotation. Failed credentials are never cached.
 This bounds hashing work but does not replace hosting-edge request limits. During an

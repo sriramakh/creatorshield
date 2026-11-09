@@ -199,6 +199,8 @@ def test_invalid_sponsorship_is_rejected_by_upload_and_import_api():
         "I saw an ad yesterday. Use code FIT20",
         "I saw an ad. Use code FIT20",
         "I am an employee. Use code FIT20",
+        "Ad-free workout plan! Use code FIT20",
+        "Collaboration-ready templates. Use code FIT20",
     ],
 )
 def test_ordinary_words_are_not_labels(caption):

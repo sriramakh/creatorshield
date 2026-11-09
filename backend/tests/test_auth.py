@@ -190,3 +190,49 @@ def test_hash_concurrency_is_bounded_and_cached_login_survives_limit(monkeypatch
             assert await asyncio.gather(*pending) == [False, False]
 
     asyncio.run(run())
+
+
+def test_parallel_requests_with_a_new_login_share_one_hash(monkeypatch):
+    import asyncio
+
+    import app.auth as auth
+
+    calls = []
+
+    def check(header, *args):
+        calls.append(header)
+        return header == "good"
+
+    monkeypatch.setattr(auth, "valid_credentials", check)
+
+    async def run():
+        verifier = auth.CredentialVerifier("agency", "hash")
+        # A page load after the cache entry lapsed: assets and API calls arrive together.
+        assert await asyncio.gather(*(verifier.verify("good") for _ in range(12))) == [True] * 12
+        assert await asyncio.gather(*(verifier.verify("bad") for _ in range(12))) == [False] * 12
+        assert calls == ["good", "bad"]
+
+    asyncio.run(run())
+
+
+def test_active_session_keeps_its_cache_entry(monkeypatch):
+    import asyncio
+
+    import app.auth as auth
+
+    calls = []
+    now = [100.0]
+    monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(auth, "valid_credentials", lambda header, *a: calls.append(header) or True)
+
+    async def run():
+        verifier = auth.CredentialVerifier("agency", "hash")
+        for _ in range(5):
+            assert await verifier.verify("good")
+            now[0] += 200  # used every 200 s for 1000 s
+        assert len(calls) == 1
+        now[0] += 301  # idle longer than the timeout
+        assert await verifier.verify("good")
+        assert len(calls) == 2
+
+    asyncio.run(run())

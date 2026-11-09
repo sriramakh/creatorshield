@@ -9,7 +9,8 @@ LABEL = re.compile(
     r"partnership|employee|affiliate|paidpartnership|विज्ञापन|प्रायोजित)(?!\w)|"
     r"paid\s+partnership(?!\w)|sponsored(?!\w)|"
     r"(?:advertisement|advert|ad|collaboration|partnership|employee|free\s+gift|"
-    r"affiliate|विज्ञापन|प्रायोजित)(?!\w)(?=\s*[:|–—-])|"
+    # "Ad: ..." or "Ad - ...", but not a hyphenated word such as "ad-free".
+    r"affiliate|विज्ञापन|प्रायोजित)(?!\w)(?=\s*[:|–—]|\s+-)|"
     r"^\s*(?:advertisement|advert|ad|collaboration|partnership|employee|free\s+gift|"
     r"affiliate|विज्ञापन|प्रायोजित)\s*$|"
     r"(?:collaboration|partnership)\s+with\s+\S+)",

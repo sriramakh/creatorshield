@@ -40,6 +40,12 @@ class AuthBusy(Exception):
     """Uncached authentication work is bounded per process."""
 
 
+class _Pending:
+    def __init__(self) -> None:
+        self.done = anyio.Event()
+        self.valid = False
+
+
 class CredentialVerifier:
     def __init__(self, username: str, stored: str):
         self.username, self.stored = username, stored
@@ -47,6 +53,7 @@ class CredentialVerifier:
         self.cache: OrderedDict[bytes, float] = OrderedDict()
         self.attempts: deque[float] = deque()
         self.slots = anyio.Semaphore(2)
+        self.pending: dict[bytes, _Pending] = {}
 
     async def verify(self, header: str) -> bool:
         if not header or len(header) > 4102:
@@ -56,7 +63,17 @@ class CredentialVerifier:
         while self.cache and next(iter(self.cache.values())) <= now:
             self.cache.popitem(last=False)
         if self.cache.get(key, 0) > now:
+            # Idle timeout: an active session keeps its entry. Every entry gets the
+            # same lifetime, so moving it to the end keeps the cache ordered by expiry.
+            self.cache[key] = now + 300
+            self.cache.move_to_end(key)
             return True
+        # A page load sends many requests with the same new header at once: they share
+        # one hash instead of competing for slots and getting 429s.
+        job = self.pending.get(key)
+        if job is not None:
+            await job.done.wait()
+            return job.valid
         while self.attempts and self.attempts[0] <= now - 60:
             self.attempts.popleft()
         if len(self.attempts) >= 20:
@@ -66,18 +83,21 @@ class CredentialVerifier:
         except anyio.WouldBlock as exc:
             raise AuthBusy from exc
         self.attempts.append(now)
+        job = self.pending[key] = _Pending()
         try:
-            valid = await anyio.to_thread.run_sync(
+            job.valid = await anyio.to_thread.run_sync(
                 valid_credentials, header, self.username, self.stored
             )
         finally:
             self.slots.release()
-        if valid:
+            del self.pending[key]
+            job.done.set()
+        if job.valid:
             self.cache[key] = time.monotonic() + 300
             self.cache.move_to_end(key)
             while len(self.cache) > 128:
                 self.cache.popitem(last=False)
-        return valid
+        return job.valid
 
 
 def install_auth(app, settings):
