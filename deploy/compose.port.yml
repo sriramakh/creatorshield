@@ -1,0 +1,74 @@
+# Test instance on a shared host, reached at http://HOST:PORT (no domain, so no HTTPS:
+# the login travels unencrypted; use compose.pilot.yml with a domain for customers).
+#
+#   PUBLIC_PORT=8095 FRONTEND_URL=http://HOST:8095 ENV_FILE=/abs/path/creatorshield.env \
+#     DB_PASSWORD=... docker compose -p creatorshield -f deploy/compose.port.yml up --build -d
+#
+# Only the gateway publishes a port. ENV_FILE must set PILOT_USERNAME and
+# PILOT_PASSWORD_HASH (the API refuses requests without a login) plus provider keys.
+services:
+  gateway:
+    image: caddy:2-alpine
+    ports: ["${PUBLIC_PORT:?required}:8080"]
+    volumes:
+      - ./Caddyfile.port:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [api, frontend]
+    restart: unless-stopped
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: creatorshield
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?required}
+      POSTGRES_DB: creatorshield
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creatorshield"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+  api:
+    build: ../backend
+    env_file: ${ENV_FILE:?required}
+    environment: &env
+      DATABASE_URL: postgresql+psycopg://creatorshield:${DB_PASSWORD}@postgres:5432/creatorshield
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /app/var/storage
+      HF_HOME: /app/var/hf
+      FRONTEND_URL: ${FRONTEND_URL:?required}
+      API_PUBLIC_URL: ${FRONTEND_URL}
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
+    volumes: ["media:/app/var"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"]
+      interval: 5s
+      retries: 30
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+    restart: unless-stopped
+  worker:
+    build: ../backend
+    env_file: ${ENV_FILE}
+    environment: *env
+    command: python -m app.worker
+    volumes: ["media:/app/var"]
+    # Video work uses every core it gets; leave room for other services on the host.
+    deploy:
+      resources:
+        limits: {cpus: "2", memory: 6g}
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  frontend:
+    build:
+      context: ../frontend
+      args: {NEXT_PUBLIC_API_URL: ""}
+    restart: unless-stopped
+volumes:
+  pgdata:
+  media:
+  caddy_data:

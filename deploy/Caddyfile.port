@@ -1,0 +1,14 @@
+# Plain-HTTP gateway on one port, for a test instance reached by IP address.
+# Every request is checked by the API's login first (forward_auth).
+:8080 {
+    forward_auth api:8000 {
+        uri /auth/verify
+    }
+    @api path /api/* /auth/*
+    handle @api {
+        reverse_proxy api:8000
+    }
+    handle {
+        reverse_proxy frontend:3000
+    }
+}
