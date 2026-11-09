@@ -4,8 +4,8 @@ The AI review sees the same frames as the provenance checks, so it often reports
 the same handle, broadcaster or brand. Two outcomes, recomputed on every rebuild
 (so they follow ledger changes):
 
-* covered   - the finding concerns something the rights ledger covers. It stays
-              visible with a note, and no longer counts toward the risk score.
+* supporting record - a possible ledger match is noted for human review;
+                      free-text findings remain counted.
 * duplicate - a provenance finding already reports the same gap (with the
               ledger-aware fix). The duplicate stays visible, muted, and does not
               count twice.
@@ -127,10 +127,13 @@ def reconcile(
                     "the rights, not this issue, so it still counts."
                 )
                 continue
-            f.rights_status = "covered"
+            # Free-text findings may contain several concerns. A shared frame or
+            # counterparty name cannot prove that the entire finding is covered.
+            f.requires_human_review = True
             f.rights_note = (
-                f"Covered: {line['subject']} is recorded as {_record_text(line)}. "
-                "Not counted in the risk score."
+                f"Potential supporting record: {line['subject']} "
+                f"is recorded as {_record_text(line)}. "
+                "Confirm that it covers every concern and intended use; this finding still counts."
             )
             continue
         for line, _, _ in open_lines:

@@ -775,7 +775,7 @@ def licence_for_star() -> LedgerEntry:
     return _entry("footage_license", "Star India", "Star Sports")
 
 
-def test_ai_duplicates_are_not_counted_twice_and_ledger_covers_ai_findings() -> None:
+def test_ai_duplicates_are_not_counted_twice_and_ledger_supports_ai_findings() -> None:
     from app.provenance.reconcile import reconcile
 
     prov = {
@@ -829,8 +829,8 @@ def test_ai_duplicates_are_not_counted_twice_and_ledger_covers_ai_findings() -> 
     drafts = [*found, ai, unrelated]
     reconcile(drafts, lines, prov, extraction)
     assert found == []
-    assert ai.rights_status == "covered" and "footage" in (ai.rights_note or "")
-    assert compute_risk(drafts) == compute_risk([unrelated])
+    assert ai.rights_status is None and "footage" in (ai.rights_note or "")
+    assert compute_risk(drafts) == compute_risk([ai, unrelated])
 
 
 def test_reconcile_does_not_match_short_substrings() -> None:
@@ -851,7 +851,7 @@ def test_reconcile_does_not_match_short_substrings() -> None:
     apple = _ai("licensing", "The track Apple is in the bed", [], "song Apple")
     reconcile([pineapple, apple], lines, prov, {})
     assert pineapple.rights_status is None
-    assert apple.rights_status == "covered"
+    assert apple.rights_status is None and "still counts" in (apple.rights_note or "")
 
     news = {
         "cues": {

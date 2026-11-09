@@ -23,7 +23,7 @@ from app.provenance.ledger import (
 from app.schemas import FindingDraft
 
 PERMISSION_KINDS = {"creator_permission"}
-FOOTAGE_KINDS = {"footage_license", "music_license", "creator_permission"}
+FOOTAGE_KINDS = {"footage_license", "creator_permission"}
 MUSIC_KINDS = {"music_license"}
 BRAND_KINDS = {"brand_agreement"}
 OWN_KINDS = {"own_channel"}
@@ -108,7 +108,9 @@ def build(
     own_terms = {
         normalise_handle(t)
         for e in entries
-        if e.kind in OWN_KINDS and e.applies_to(platform, client_label)
+        if e.kind in OWN_KINDS
+        and e.applies_to(platform, client_label)
+        and e.status(today) == "active"
         for t in e.terms
     } | connected
     cues = provenance.get("cues") or {}
@@ -135,7 +137,9 @@ def build(
                 )
             )
             continue
-        status, recs = _best(find_entries(entries, PERMISSION_KINDS, handle=handle, **scope), today)
+        status, recs = _best(
+            find_entries(entries, PERMISSION_KINDS | OWN_KINDS, handle=handle, **scope), today
+        )
         if status == "covered":
             detail = (
                 "Permission recorded in your rights ledger. Permission covers the rights, not "
@@ -473,18 +477,22 @@ def build(
         partial = [p for p in pages if not p.get("full_match")]
         if not full and not partial:
             continue
+        active_entries = [e for e in entries if e.status(today) == "active"]
         covered = [
             p
             for p in full + partial
             if find_entries(
-                entries,
+                active_entries,
                 FOOTAGE_KINDS | OWN_KINDS,
                 text=f"{p.get('domain', '')} {p.get('title', '')}",
                 **scope,
             )
         ]
         uncovered_full = [p for p in full if p not in covered]
-        status = "covered" if covered and not uncovered_full else "missing"
+        uncovered_partial = [p for p in partial if p not in covered]
+        status = (
+            "covered" if covered and not uncovered_full and not uncovered_partial else "missing"
+        )
         mock = bool(web.get("is_mock"))
         lines.append(
             _line(
@@ -497,8 +505,8 @@ def build(
                 start=frame.get("timestamp"),
             )
         )
-        if uncovered_full or (partial and not covered):
-            web_hits.append((frame, uncovered_full, partial, mock))
+        if uncovered_full or uncovered_partial:
+            web_hits.append((frame, uncovered_full, uncovered_partial, mock))
     if web_hits:
         mock = all(h[3] for h in web_hits)
         any_full = any(h[1] for h in web_hits)
