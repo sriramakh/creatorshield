@@ -5,11 +5,22 @@ from __future__ import annotations
 import re
 
 LABEL = re.compile(
-    r"(?<!\w)#?(?:advertisement|advert|ad|sponsored|collaboration|partnership|employee|"
-    r"free\s+gift|affiliate|paid\s+partnership|विज्ञापन|प्रायोजित)(?!\w)",
+    r"(?<!\w)(?:#(?:ad|advertisement|advert|sponsored|collab|collaboration|partner|"
+    r"partnership|employee|affiliate|paidpartnership|विज्ञापन|प्रायोजित)(?!\w)|"
+    r"paid\s+partnership(?!\w)|sponsored(?!\w)|"
+    r"(?:advertisement|advert|ad|collaboration|partnership|employee|free\s+gift|"
+    r"affiliate|विज्ञापन|प्रायोजित)(?!\w)(?=\s*[:|–—-])|"
+    r"^\s*(?:advertisement|advert|ad|collaboration|partnership|employee|free\s+gift|"
+    r"affiliate|विज्ञापन|प्रायोजित)\s*$|"
+    r"(?:collaboration|partnership)\s+with\s+\S+)",
     re.I,
 )
-NEGATION = re.compile(r"\b(?:not|no|never|isn't|wasn't|isnt|wasnt|without)\b|नहीं", re.I)
+# Only denial/uncertainty attached to the label; product copy elsewhere is irrelevant.
+NEGATION = re.compile(
+    r"(?:\b(?:not|no|never|isn't|wasn't|isnt|wasnt|without|maybe|if)|"
+    r"\b(?:might|could)(?:\s+be)?)(?:\s+(?:an?|paid))?\s*$",
+    re.I,
+)
 
 
 def disclosure_sentences(text: str) -> list[tuple[int, str]]:
@@ -18,7 +29,9 @@ def disclosure_sentences(text: str) -> list[tuple[int, str]]:
         body = sentence.group()
         for match in LABEL.finditer(body):
             # A denial or uncertain assertion must never establish disclosure.
-            if NEGATION.search(body) or re.search(r"\b(?:maybe|might|could|if)\b", body, re.I):
+            if NEGATION.search(body[: match.start()]) or re.match(
+                r"\s*(?:नहीं|नही)(?!\w)", body[match.end() :]
+            ):
                 continue
             out.append((sentence.start() + match.start(), body))
             break

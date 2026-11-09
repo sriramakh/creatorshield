@@ -84,7 +84,7 @@ against **what you have recorded a right to**:
 |---|---|---|
 | On-screen cues | free | Other accounts' `@handles`, broadcaster / studio / label names (Star Sports, Netflix, T-Series…), copyright notices; the AI review also looks for logos, scoreboards, letterboxed film, face-cams |
 | **Catalogue** | free | Reposts of a client's earlier posts, and the **same footage under two different clients** (mirrored copies too). Index past posts on the **Catalogue** page — only a fingerprint is kept |
-| **Rights ledger** | free | Your own channels, creator permissions, music / footage licences and paid brand agreements. Covered items stop being findings; a recorded brand mentioned without `#ad` becomes a **high** finding |
+| **Rights ledger** | free | Your own channels, creator permissions, music / footage licences and paid brand agreements. Active, correctly typed records can cover specific provenance matches. AI/rule licensing concerns remain counted with a supporting-record note; missing opening disclosure for a recorded brand prompts review |
 | YouTube look-alikes | free (100 of the daily quota units per search) | Re-uploads with similar titles and thumbnails. On request; needs `YOUTUBE_SEARCH_API_KEY` or a connected channel |
 | Song identification | paid, **off** by default | Names commercial tracks in detected music (≈ $0.005 per 12 s clip, ≤ 2 clips). `MUSIC_ID_PROVIDER=audd` + `AUDD_API_TOKEN` |
 | Web image search | paid, **off** by default | Stock, film/TV stills, news images and thumbnails matching key frames (≈ $0.0035 per frame, ≤ 4). `WEB_DETECTION_PROVIDER=google` + `GOOGLE_VISION_API_KEY` |
@@ -170,3 +170,13 @@ India guidance is advisory; the tool does not determine applicable jurisdiction.
 
 Run `alembic upgrade head` before starting the updated application. Rerun existing
 analyses to apply the new disclosure checks; historical reports are not automatically rewritten.
+
+
+The opening-line restriction is intentionally conservative: separately entered hashtags,
+speech and sampled on-screen text do not clear the caption check. A declaration of no
+commercial relationship does not override contradictory promotional signals; review is
+still requested, without asserting that a sponsorship exists. Plain words in ordinary
+prose are not labels; use explicit forms such as `Ad:`, `Collaboration with Brand`, or a
+recognized hashtag. Negation is checked next to the label, not across the whole sentence.
+The historical Covered badge is retained for existing reports; new AI/rule findings use
+supporting-record notes and remain counted.

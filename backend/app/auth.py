@@ -6,8 +6,11 @@ import base64
 import hashlib
 import hmac
 import secrets
+import time
+from collections import OrderedDict, deque
 from urllib.parse import urlsplit
 
+import anyio
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -33,6 +36,50 @@ def valid_credentials(header: str, username: str, stored: str) -> bool:
         return False
 
 
+class AuthBusy(Exception):
+    """Uncached authentication work is bounded per process."""
+
+
+class CredentialVerifier:
+    def __init__(self, username: str, stored: str):
+        self.username, self.stored = username, stored
+        self.key = secrets.token_bytes(32)
+        self.cache: OrderedDict[bytes, float] = OrderedDict()
+        self.attempts: deque[float] = deque()
+        self.slots = anyio.Semaphore(2)
+
+    async def verify(self, header: str) -> bool:
+        if not header or len(header) > 4102:
+            return False
+        now = time.monotonic()
+        key = hmac.digest(self.key, header.encode(), "sha256")
+        while self.cache and next(iter(self.cache.values())) <= now:
+            self.cache.popitem(last=False)
+        if self.cache.get(key, 0) > now:
+            return True
+        while self.attempts and self.attempts[0] <= now - 60:
+            self.attempts.popleft()
+        if len(self.attempts) >= 20:
+            raise AuthBusy
+        try:
+            self.slots.acquire_nowait()
+        except anyio.WouldBlock as exc:
+            raise AuthBusy from exc
+        self.attempts.append(now)
+        try:
+            valid = await anyio.to_thread.run_sync(
+                valid_credentials, header, self.username, self.stored
+            )
+        finally:
+            self.slots.release()
+        if valid:
+            self.cache[key] = time.monotonic() + 300
+            self.cache.move_to_end(key)
+            while len(self.cache) > 128:
+                self.cache.popitem(last=False)
+        return valid
+
+
 def install_auth(app, settings):
     enabled = bool(settings.pilot_username and settings.pilot_password_hash)
     if settings.app_env == "production":
@@ -52,13 +99,21 @@ def install_auth(app, settings):
         raise RuntimeError("Invalid PILOT_PASSWORD_HASH; generate it with hash_password") from exc
     origin = settings.frontend_url.rstrip("/")
 
+    verifier = CredentialVerifier(
+        settings.pilot_username, settings.pilot_password_hash.get_secret_value()
+    )
+
     @app.middleware("http")
     async def authenticate(request: Request, call_next):
-        if not valid_credentials(
-            request.headers.get("authorization", ""),
-            settings.pilot_username,
-            settings.pilot_password_hash.get_secret_value(),
-        ):
+        try:
+            accepted = await verifier.verify(request.headers.get("authorization", ""))
+        except AuthBusy:
+            return JSONResponse(
+                {"detail": "Too many login attempts. Try again shortly."},
+                status_code=429,
+                headers={"Retry-After": "60", "Cache-Control": "no-store"},
+            )
+        if not accepted:
             return JSONResponse(
                 {"detail": "Sign in to your agency workspace."},
                 status_code=401,

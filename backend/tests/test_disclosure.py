@@ -48,7 +48,7 @@ def test_denied_uncertain_or_buried_label_is_not_opening_disclosure(text):
 def test_accepted_wording_is_detected_without_clearance(label):
     findings = run_deterministic_checks(
         "instagram_reels",
-        label + " Brand",
+        label + ": Brand",
         [],
         {},
         30,
@@ -187,3 +187,56 @@ def test_invalid_sponsorship_is_rejected_by_upload_and_import_api():
         },
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "Big collaboration coming soon! Use code FIT20",
+        "I work as an employee at a bank. Use code FIT20",
+        "Our partnership is growing. Use code FIT20",
+        "I am an affiliate marketer. Use code FIT20",
+        "I saw an ad yesterday. Use code FIT20",
+        "I saw an ad. Use code FIT20",
+        "I am an employee. Use code FIT20",
+    ],
+)
+def test_ordinary_words_are_not_labels(caption):
+    assert not caption_disclosure(caption)
+    findings = run_deterministic_checks("youtube_shorts", caption, [], {}, 30)
+    assert any(
+        f.category == "disclosure" and f.finding_type == "suspected_violation" for f in findings
+    )
+
+
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "Sponsored by FitFuel - no added sugar!",
+        "#ad FitFuel shake, perfect if you train early",
+        "Ad: FitFuel",
+        "Ad",
+        "Collaboration with FitFuel",
+        "#collab FitFuel",
+        "#partner FitFuel",
+        "Paid partnership with FitFuel, not too sweet",
+    ],
+)
+def test_label_negation_is_local(caption):
+    assert caption_disclosure(caption)
+
+
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "not sponsored",
+        "no ad",
+        "not an ad",
+        "never sponsored",
+        "maybe sponsored",
+        "could be sponsored",
+        "not #ad",
+    ],
+)
+def test_direct_denials_and_uncertainty_still_rejected(caption):
+    assert not caption_disclosure(caption)

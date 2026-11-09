@@ -26,3 +26,12 @@ Configure DNS for the hostname and allow ports 80/443 for Caddy certificate issu
 Basic authentication intentionally has no application session or logout button. Use a dedicated browser profile; close it after use, and rotate the password hash and restart the API to revoke credentials. Do not share this operator login with separate clients. Rate limiting at the hosting edge and individual user/session management remain prerequisites for wider self-service access.
 
 Before customer use, test real HTTPS browser login, uploads, report/video/proof downloads, OAuth callbacks and credential rotation. Verify unauthenticated requests return 401, cross-site writes return 403, and a second agency's credentials fail. Validate separate database/volume identities and backups. The automated authentication checks do not substitute for this deployment test. Other audit blockers (rights accuracy, retention, evaluation) remain separate work.
+
+
+Authentication verifies uncached headers in worker threads (at most two concurrently),
+with at most 20 uncached attempts per minute per API process. Excess attempts return 429.
+Successful headers are cached for five minutes, with at most 128 HMAC keys in memory;
+raw headers and passwords are not cached. Caches are local to each application instance
+and are cleared on restart/credential rotation. Failed credentials are never cached.
+This bounds hashing work but does not replace hosting-edge request limits. During an
+attack, new logins may be throttled while already cached credentials continue to work.

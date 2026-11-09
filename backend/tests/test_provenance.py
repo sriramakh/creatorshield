@@ -237,9 +237,7 @@ def test_client_scoped_right_does_not_cover_another_client() -> None:
 
 
 def test_future_right_is_not_described_as_ended() -> None:
-    future = _entry(
-        "creator_permission", "Clips Daily", "@clipsdaily", starts=TODAY + timedelta(2)
-    )
+    future = _entry("creator_permission", "Clips Daily", "@clipsdaily", starts=TODAY + timedelta(2))
     findings, lines = _build(HANDLE_PROV, [future])
     assert lines[0]["status"] == "not_started"
     assert "not yet valid" in lines[0]["detail"]

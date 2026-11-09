@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -239,3 +240,12 @@ class PaidLookup(Base):
     cache_key: Mapped[str] = mapped_column(String(64), index=True)
     analysis_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     response: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class AgencyBinding(Base):
+    """Permanent ownership marker for a dedicated pilot database."""
+
+    __tablename__ = "agency_binding"
+    __table_args__ = (CheckConstraint("id = 1", name="single_agency"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agency_id: Mapped[str] = mapped_column(Text, nullable=False)

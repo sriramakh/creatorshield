@@ -113,15 +113,16 @@ Matching rules worth knowing:
   "repost" finding; different client → "footage also appears under another client";
   earlier reviews of the same client's drafts and shared audio only → info lines.
 - `reconcile.py` links AI / rule findings to coverage lines (shared evidence IDs or the
-  subject named in the finding): duplicates of a provenance finding and ledger-covered
-  licensing findings get `rights_status` (`duplicate` / `covered`), stay visible and are
-  excluded from the risk score. Recomputed on every rebuild.
+  subject named in the finding): duplicates of a provenance finding get `rights_status=duplicate` and are excluded
+  from scoring. Ledger matches add supporting-record notes to AI/rule licensing findings,
+  which remain counted for human review. Only specific provenance matches can be covered
+  by active, correctly typed records. Recomputed on every rebuild.
 - YouTube search never downloads candidate videos; only the public thumbnail is fetched
   from `i.ytimg.com`, hashed and discarded.
 
 ## Policy knowledge base
 
-`backend/app/policies/data/policy_kb.yaml` (version `2026.10.21`, 35 rules):
+`backend/app/policies/data/policy_kb.yaml` (version `2026.11.09`, 35 rules):
 YouTube (16), Meta Community Standards (11, apply to Instagram), Instagram (7),
 India/ASCI advisory (1). Each rule has a CreatorShield ID (platforms don't number
 their policies), the official URL and title, the verification date, paraphrased
