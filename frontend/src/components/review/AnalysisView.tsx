@@ -58,7 +58,7 @@ export function AnalysisView() {
         <Banner tone="danger" title={error.status === 404 ? "Analysis not found" : "Could not load analysis"}>
           {error.status === 404 ? "It may have been deleted or expired under the retention policy." : error.message}
         </Banner>
-        <Link href="/" className="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline">← Back to analyses</Link>
+        <Link href="/dashboard" className="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline">← Back to analyses</Link>
       </div>
     );
   if (!analysis) return <LoadingSkeleton />;
@@ -226,7 +226,7 @@ function Header({ analysis, actions }: { analysis: Analysis; actions?: React.Rea
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <Link href="/" className="text-xs font-medium text-slate-500 hover:text-slate-800">← Analyses</Link>
+        <Link href="/dashboard" className="text-xs font-medium text-slate-500 hover:text-slate-800">← Analyses</Link>
         <h1 className="mt-1 max-w-2xl truncate text-xl font-semibold tracking-tight">
           {analysis.source_title?.trim() || analysis.caption?.trim().split("\n")[0] || "Untitled video"}
         </h1>
@@ -346,7 +346,7 @@ function ReviewDashboard({ analysis, onReload }: { analysis: Analysis; onReload:
                   type="button"
                   onClick={async () => {
                     await api.remove(analysis.id);
-                    router.push("/");
+                    router.push("/dashboard");
                   }}
                   className="rounded-md bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700"
                 >

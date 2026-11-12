@@ -64,7 +64,7 @@ test("connect accounts, import own posts, enforce ownership, disconnect", async 
   await ytCard.getByRole("button", { name: "Disconnect" }).click();
   await ytCard.getByRole("button", { name: "Disconnect" }).click();
   await expect(page.getByText("Demo Creator")).toHaveCount(0);
-  await page.goto("/");
+  await page.goto("/dashboard");
   await expect(page.getByText("My morning routine 💪 #shorts")).toHaveCount(0);
   await expect(page.getByText("Morning routine with FitFuel").first()).toBeVisible();
 });

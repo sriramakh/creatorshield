@@ -56,7 +56,7 @@ test("upload a video, review timestamped findings, seek, and export the report",
   expect(html).toContain("not a probability of removal");
 
   // 6. Dashboard lists the analysis
-  await page.goto("/");
+  await page.goto("/dashboard");
   await expect(page.getByText("My morning routine with FitFuel").first()).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/dashboard.png`, fullPage: true });
 });

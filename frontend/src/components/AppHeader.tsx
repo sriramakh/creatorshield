@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { ShieldIcon } from "./icons";
 
 const NAV = [
-  { href: "/", label: "Analyses" },
+  { href: "/dashboard", label: "Analyses" },
   { href: "/connections", label: "Connected accounts" },
   { href: "/rights", label: "Rights ledger" },
   { href: "/catalogue", label: "Catalogue" },
@@ -15,7 +15,8 @@ const NAV = [
 
 function isActive(href: string, pathname: string | null) {
   if (!pathname) return false;
-  if (href === "/") return pathname === "/" || (pathname.startsWith("/analyses/") && pathname !== "/analyses/new");
+  if (href === "/dashboard")
+    return pathname === "/dashboard" || (pathname.startsWith("/analyses/") && pathname !== "/analyses/new");
   return pathname.startsWith(href);
 }
 
@@ -48,7 +49,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-6 lg:gap-8">
-          <Link href="/" className="flex flex-none items-center gap-2">
+          <Link href="/dashboard" className="flex flex-none items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
               <ShieldIcon className="h-4.5 w-4.5" />
             </span>
