@@ -48,6 +48,11 @@ STANDARD_LIMITATIONS = [
     "be missed.",
     "Speech recognition and on-screen text recognition can contain errors, especially for "
     "Hindi, music-heavy audio and stylised fonts.",
+    "Community-guideline results are risk flags from wording in the transcript, on-screen "
+    "text, caption and hashtags. They are not a decision that a policy was broken. The "
+    "rule check does not classify imagery. Local advertising codes, including FTC and UK CAP "
+    "rules, are not in the policy library; the flags use YouTube and Meta policies, which "
+    "apply in India, the US and the UK.",
     "Policy summaries reflect official pages as verified on the knowledge-base date; "
     "platforms update policies without notice.",
 ]

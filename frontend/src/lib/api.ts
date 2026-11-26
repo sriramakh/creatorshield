@@ -53,6 +53,8 @@ export interface Finding {
   /** covered = the rights ledger covers it; duplicate = a provenance finding reports it. Not counted in risk. */
   rights_status: "covered" | "duplicate" | null;
   rights_note: string | null;
+  /** Set by the API. Disclosure stays separate from community-guideline flags. */
+  report_section?: "community" | "disclosure" | "other";
 }
 
 export interface TranscriptSegment {

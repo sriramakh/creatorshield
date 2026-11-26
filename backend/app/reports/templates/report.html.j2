@@ -101,9 +101,7 @@
   {% if a.summary %}<h2>Summary</h2><p class="summary">{{ a.summary }}</p>{% endif %}
   {% if a.context_assessment %}<p><strong>Context:</strong> {{ a.context_assessment }}</p>{% endif %}
 
-  <h2>Findings ({{ actionable|length }})</h2>
-  {% if not actionable %}<p>No issues were identified by the checks that ran. This does not guarantee compliance.</p>{% endif %}
-  {% for f in actionable %}
+  {% macro finding_card(f, type_labels) %}
   <div class="finding {{ f.severity }}">
     <div class="tags">
       <span class="tag sev {{ f.severity }}">{{ f.severity }}</span>
@@ -122,7 +120,7 @@
     <ul class="ev">{% for e in f.evidence %}<li><code>{{ e.ref_id }}</code>{% if e.timestamp is not none %} @ {{ e.timestamp|ts }}{% endif %} — {{ e.detail }}</li>{% endfor %}</ul>
     {% endif %}
     {% if f.context_exception %}<div class="label">Context consideration</div><div>{{ f.context_exception }}</div>{% endif %}
-    <div class="label">Suggested action</div><div>{{ f.suggested_action }}</div>
+    <div class="label">Suggested fix</div><div>{{ f.suggested_action }}</div>
     <div class="label">Policy reference</div>
     {% if f.policies %}
     <ul class="ev">{% for p in f.policies %}<li><code>{{ p.id }}</code> {{ p.title }} — <a href="{{ p.official_url }}">{{ p.official_title }}</a> <span class="note">(verified {{ p.verified_on }})</span></li>{% endfor %}</ul>
@@ -130,7 +128,23 @@
     {% if f.rights_note %}<div class="note">{{ f.rights_note }}</div>{% endif %}
     {% if f.validation_notes %}<div class="note">Validation: {{ f.validation_notes|join(" ") }}</div>{% endif %}
   </div>
-  {% endfor %}
+  {% endmacro %}
+
+  <h2 id="community-guidelines">Community guidelines ({{ community|length }})</h2>
+  <p class="note">Risk flags for content that may lead to a strike, removal, an age restriction, reduced distribution or loss of monetisation under YouTube's Community Guidelines or Instagram and Meta's Community Standards. A flag is a signal to review, not a legal conclusion and not a prediction of enforcement. The check reads the transcript, on-screen text, caption and hashtags. It does not classify imagery.</p>
+  {% if not community %}<p>No community-guideline risk flags in the text that was checked. This is not a clearance.</p>{% endif %}
+  {% for f in community %}{{ finding_card(f, type_labels) }}{% endfor %}
+
+  <h2 id="disclosure">Sponsored-content disclosure ({{ disclosure|length }})</h2>
+  <p class="note">Paid-promotion and sponsorship signals. These checks do not confirm the platform's paid-promotion setting.</p>
+  {% if not disclosure %}<p>No sponsorship-disclosure issue was flagged in the text that was checked. This is not a clearance.</p>{% endif %}
+  {% for f in disclosure %}{{ finding_card(f, type_labels) }}{% endfor %}
+
+  {% if other %}
+  <h2>Other findings ({{ other|length }})</h2>
+  {% for f in other %}{{ finding_card(f, type_labels) }}{% endfor %}
+  {% endif %}
+  {% if not actionable %}<p class="note">No issues were identified by the checks that ran. This does not guarantee compliance.</p>{% endif %}
 
   {% set prov = a.provenance or {} %}
   {% if prov.rights %}

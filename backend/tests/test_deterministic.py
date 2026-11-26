@@ -95,7 +95,9 @@ def test_cannot_check_items_always_present_and_clean_video_is_low_risk() -> None
         extraction(["here are three stretches"]),
         20,
     )
-    assert [f.finding_type for f in out] == ["cannot_check", "cannot_check"]
+    assert [f.finding_type for f in out] == ["cannot_check", "cannot_check", "cannot_check"]
+    assert out[-1].title == "Imagery was not classified for community-guideline risks"
+    assert out[-1].category == "community_guidelines"
     score, level = compute_risk(out)
     assert (score, level) == (0, "low")
 

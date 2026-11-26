@@ -85,6 +85,9 @@ violation or demonetization; medium = meaningful risk worth fixing; low = minor 
 best-practice; info = note only. Calibrate confidence honestly; a single ambiguous signal is low.
 - Do not flag something merely because it is a sensitive topic. Do not report the same issue \
 twice. If the content looks compliant, return few or no findings - that is a valid result.
+- A rule check already flags some community-guideline risks from wording. Still review \
+the frames for visual-only risks (nudity, graphic violence, weapons, dangerous acts) that \
+the words do not mention. Phrase those as risks, not as a certainty of removal or a strike.
 - Look for visual signs of third-party material: broadcaster, studio or channel logos; \
 scoreboards and sports broadcast graphics; letterboxed film or TV footage; another creator's \
 watermark, handle or face-cam overlay; screen recordings of other apps or posts; subtitles \

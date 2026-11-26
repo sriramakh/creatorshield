@@ -14,7 +14,8 @@ Redis ──► RQ SimpleWorker (backend/app/worker.py)
             ├─ media/        ffprobe validation → audio (16 kHz WAV) → faster-whisper transcript
             │                → silencedetect (non-speech sound) → scene-aware frame sampling
             │                → Tesseract OCR
-            ├─ analysis/deterministic.py   rule-based checks (no AI)
+            ├─ analysis/deterministic.py   rule-based checks (no AI), including
+            │                community_guidelines.py wording risk flags
             ├─ analysis/prompt.py          provider-neutral prompt with injection defences
             ├─ analysis/providers/*        openai | anthropic | mock
             ├─ analysis/validation.py      server-side validation of AI output
@@ -125,12 +126,15 @@ Matching rules worth knowing:
 
 ## Policy knowledge base
 
-`backend/app/policies/data/policy_kb.yaml` (version `2026.11.09`, 35 rules):
-YouTube (16), Meta Community Standards (11, apply to Instagram), Instagram (7),
+`backend/app/policies/data/policy_kb.yaml` (version `2026.11.26`, 42 rules):
+YouTube (21), Meta Community Standards (13, apply to Instagram), Instagram (7),
 India/ASCI advisory (1). Each rule has a CreatorShield ID (platforms don't number
 their policies), the official URL and title, the verification date, paraphrased
 key points, and optionally a verbatim quote. The loader (Pydantic) rejects
 non-official domains and duplicate IDs. Rules are scoped per target platform.
+There are no FTC or UK CAP rules. The community-guideline check
+(`analysis/community_guidelines.py`) flags wording in the transcript, on-screen
+text, caption and hashtags. It does not classify frames.
 
 ## AI safety design
 

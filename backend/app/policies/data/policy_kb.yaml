@@ -7,15 +7,18 @@
 #
 # To update: re-fetch each official_url, revise key_points, bump `version` and
 # `verified_on`. Never add a rule whose page has not been read.
-version: "2026.11.09"
+version: "2026.11.26"
 verified_on: 2026-10-21
 notes: >-
-  Verified by fetching each official page on 2026-10-21. Meta transparency pages
-  were rendered in a headless browser because their text is built client-side.
-  help.instagram.com/477434105621119 (Instagram Community Guidelines) now
-  redirects to Meta's Community Standards; /fraud-scams/ redirects to
-  /prohibited-commercial-practices/. Facebook's "Original content guidelines"
-  were excluded because they apply to Facebook, not Instagram.
+  Verified by fetching each official page on 2026-10-21, except where a rule's
+  own verified_on is later. Meta transparency pages were rendered in a headless
+  browser because their text is built client-side. On 2026-11-26, child safety,
+  self-harm, elections misinformation, regulated goods and firearms rules were
+  added from the official pages read that day. There are no FTC or UK CAP rules
+  in this library. help.instagram.com/477434105621119 (Instagram Community
+  Guidelines) now redirects to Meta's Community Standards; /fraud-scams/
+  redirects to /prohibited-commercial-practices/. Facebook's "Original content
+  guidelines" were excluded because they apply to Facebook, not Instagram.
 
 rules:
   # ------------------------------------------------------------------ YouTube
@@ -122,6 +125,72 @@ rules:
       - "Prohibits treatment misinformation such as promoting harmful unapproved remedies, or claiming alternative cancer treatments are safer or more effective than approved care."
       - "Exceptions may apply with added context from health authorities or experts, for public-interest content, or content that disputes or satirises misinformation."
       - "Discussing specific study results and firsthand experiences may be allowed; a pattern of promoting medical misinformation can still lead to removal."
+
+  - id: YT-CG-CHILD
+    platform: youtube
+    category: child_safety
+    title: Child safety
+    official_title: Child safety policy
+    official_url: https://support.google.com/youtube/answer/2801999
+    verified_on: 2026-11-26
+    key_points:
+      - "YouTube does not allow content that endangers the emotional or physical well-being of minors. A minor is someone under 18."
+      - "Sexualization or sexual exploitation of minors is not allowed, including sexual content featuring minors. Apparent child sexual abuse imagery is reported to NCMEC."
+      - "Minors must not be put in harmful or dangerous activities, including dangerous challenges, drinking alcohol, using tobacco, vapes or marijuana, or using firearms unsupervised."
+      - "Content aimed at young children and families that contains sexual themes, violence, obscenity or other mature themes is not allowed. Titles, descriptions, tags and the audience setting must match who the content is suitable for."
+      - "Educational, documentary, scientific or artistic context is not a pass to sexualize minors or to target children with mature themes meant to shock them."
+
+  - id: YT-CG-SELFHARM
+    platform: youtube
+    category: dangerous_content
+    title: Suicide, self-harm and eating disorders
+    official_title: Suicide, self-harm, and eating disorders policy
+    official_url: https://support.google.com/youtube/answer/2802245
+    verified_on: 2026-11-26
+    key_points:
+      - "Discussion of mental health, suicide, self-harm and eating disorders is allowed when it is supportive and not harmful, including personal stories."
+      - "Not allowed: promoting or glorifying these topics, instructions (including how to hide them), graphic self-harm, content on these topics aimed at minors, and suicide or self-harm challenges."
+      - "Educational, documentary, scientific or artistic context, dramatization, and recovery discussion may be allowed, age-restricted, or shown with a crisis panel. That is not a pass to promote the behaviour."
+      - "Creators are asked to avoid methods and locations, to focus on recovery, and to include help resources. A violation can lead to removal or a strike."
+
+  - id: YT-CG-ELECTIONS
+    platform: youtube
+    category: misinformation
+    title: Elections misinformation
+    official_title: Elections misinformation policies
+    official_url: https://support.google.com/youtube/answer/10835034
+    verified_on: 2026-11-26
+    key_points:
+      - "Prohibits voter suppression: misleading voters about the time, place, means or eligibility requirements for voting, or false claims that could materially discourage voting."
+      - "Prohibits false claims about whether a current candidate or sitting official meets technical eligibility rules under national law, such as age, citizenship or whether they are alive."
+      - "Prohibits encouraging interference with democratic processes, including obstructing voting or inciting conflict at polling places to deter voters."
+      - "The policy does not ban every disputed political opinion. Educational, documentary, scientific, artistic and public-interest context can apply in the video, audio, title or description, and is not a pass to promote the misinformation."
+
+  - id: YT-CG-REGULATED
+    platform: youtube
+    category: regulated_goods
+    title: Illegal or regulated goods or services
+    official_title: Illegal or regulated goods or services policies
+    official_url: https://support.google.com/youtube/answer/9229611
+    verified_on: 2026-11-26
+    key_points:
+      - "Content meant to sell, link to, or facilitate access to certain regulated goods and services is not allowed, including by posting a phone number, email or other direct contact."
+      - "Examples include alcohol, controlled drugs, explosives, firearms and certain accessories, nicotine and vaping products, uncertified online gambling, pharmaceuticals without a prescription, and sex or escort services."
+      - "Links or contact details for buying hard drugs or certain poisons, or pharmaceuticals without a prescription, can lead to channel termination."
+      - "Educational, documentary, scientific or artistic context is not a pass to sell, create or facilitate access to those goods or services."
+
+  - id: YT-CG-FIREARMS
+    platform: youtube
+    category: regulated_goods
+    title: Firearms
+    official_title: Firearms policy
+    official_url: https://support.google.com/youtube/answer/7667605
+    verified_on: 2026-11-26
+    key_points:
+      - "Content intended to sell firearms or listed accessories, or to instruct viewers on making firearms, ammunition or those accessories, or on installing them, is not allowed."
+      - "Listed accessories include devices that convert a firearm to automatic or simulated automatic fire, high-capacity magazines and homemade suppressors."
+      - "Livestreams that show someone holding, handling or transporting a firearm are not allowed."
+      - "Real use of a homemade, automatic or certain modified firearm may be age-restricted. Educational, documentary, scientific, artistic and public-interest footage can be an exception, and is not a pass to sell or teach manufacture."
 
   - id: YT-MON-AD-FRIENDLY
     platform: youtube
@@ -350,6 +419,34 @@ rules:
       - "Removes misinformation likely to directly contribute to imminent physical harm or to election/census interference; other misinformation is reduced or given context."
       - "Removed health misinformation includes false vaccine claims and promoting harmful 'miracle cures' such as bleach or disinfectant."
       - "Users must use Meta's AI-disclosure tool when posting organic photorealistic video or realistic audio that was digitally created or altered; penalties may apply for not disclosing."
+
+  - id: META-CS-CHILD
+    platform: meta_all
+    category: child_safety
+    title: Child sexual exploitation, abuse and nudity
+    official_title: Child Sexual Exploitation, Abuse, and Nudity
+    official_url: https://transparency.meta.com/policies/community-standards/child-sexual-exploitation-abuse-nudity
+    verified_on: 2026-11-26
+    key_points:
+      - "Meta does not allow content or activity that sexually exploits or endangers children, including real minors and non-real depictions with a human likeness such as art, fiction or AI-generated imagery."
+      - "This includes sexual content involving children, sexualization of children, solicitation, and inappropriate interactions such as arranging a sexual encounter with a child."
+      - "When Meta becomes aware of apparent child exploitation, it reports it to the National Center for Missing and Exploited Children."
+      - "Non-sexual nude imagery of children is generally removed because of the risk that others misuse it. Sharing to raise awareness does not allow sexual content involving children."
+
+  - id: META-CS-RESTRICTED
+    platform: meta_all
+    category: regulated_goods
+    title: Restricted goods and services
+    official_title: Restricted Goods and Services
+    official_url: https://transparency.meta.com/policies/community-standards/restricted-goods-services
+    verified_on: 2026-11-26
+    key_points:
+      - "Individuals, manufacturers and retailers may not buy, sell, raffle, gift, transfer or trade certain goods and services on Facebook and Instagram."
+      - "High-risk drugs cannot be sold, traded, promoted or given make-or-use instructions. Debate, news and recovery discussion can be allowed."
+      - "Private individuals may not buy, sell, gift or trade firearms, ammunition or explosives. Legitimate retailers may promote some firearms, alcohol and tobacco for off-platform sale, with visibility limited for minors."
+      - "Alcohol and tobacco sales by private individuals are restricted. Depictions of consumption and brand promotion may be limited to adults 18+."
+      - "Promoting online gambling where money or cryptocurrency is required to play and forms part of the prize is not allowed."
+      - "Claims that a product cures listed incurable or terminal illnesses, including cancer, HIV and diabetes, are not allowed. Claims about managing symptoms are treated differently. Skin-whitening product sales are restricted."
 
   - id: META-AI-LABEL
     platform: meta_all

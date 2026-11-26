@@ -19,6 +19,7 @@ import {
   SOURCE_LABEL,
   STAGE_LABEL,
   TYPE_LABEL,
+  reportSection,
 } from "@/lib/format";
 import { CheckIcon, DocIcon, DownloadIcon, TrashIcon } from "../icons";
 import { Banner, Card, Skeleton } from "../ui";
@@ -499,27 +500,42 @@ function ReviewDashboard({ analysis, onReload }: { analysis: Analysis; onReload:
               </div>
             </div>
 
-            <div className="mt-4 space-y-6">
-              {actionable.length === 0 && (
-                <Card className="flex items-center gap-3 p-5 text-sm text-slate-600">
-                  <CheckIcon className="h-5 w-5 text-emerald-600" />
-                  No issues were identified by the checks that ran. This does not guarantee compliance — see limitations below.
-                </Card>
-              )}
+            <div className="mt-4 space-y-8">
               {actionable.length > 0 && grouped.length === 0 && (
                 <p className="text-sm text-slate-500">No findings match these filters.</p>
               )}
-              {grouped.map((g) => (
-                <div key={g.sev} className="space-y-3">
-                  <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <span className={`h-2 w-2 rounded-full ${sevDot[g.sev]}`} />
-                    {SEVERITY_LABEL[g.sev]} · {g.items.length}
-                  </h3>
-                  {g.items.map((f) => (
-                    <FindingCard key={f.id} finding={f} onSeek={seek} highlighted={highlight === f.id} />
-                  ))}
-                </div>
-              ))}
+              <FindingSection
+                id="community-guidelines"
+                title="Community guidelines"
+                note="Risk flags for content that may lead to a strike, removal, an age restriction, reduced distribution or loss of monetisation under YouTube's Community Guidelines or Instagram and Meta's Community Standards. A flag is a signal to review, not a legal conclusion. The rule check reads speech, on-screen text, the caption and hashtags. It does not classify imagery."
+                empty="No community-guideline risk flags in the text that was checked. This is not a clearance."
+                items={filtered.filter((f) => reportSection(f) === "community")}
+                total={actionable.filter((f) => reportSection(f) === "community").length}
+                onSeek={seek}
+                highlight={highlight}
+              />
+              <FindingSection
+                id="disclosure"
+                title="Sponsored-content disclosure"
+                note="Paid-promotion and sponsorship signals. These checks do not confirm the platform's paid-promotion setting."
+                empty="No sponsorship-disclosure issue was flagged in the text that was checked. This is not a clearance."
+                items={filtered.filter((f) => reportSection(f) === "disclosure")}
+                total={actionable.filter((f) => reportSection(f) === "disclosure").length}
+                onSeek={seek}
+                highlight={highlight}
+              />
+              {actionable.some((f) => reportSection(f) === "other") && (
+                <FindingSection
+                  id="other-findings"
+                  title="Other findings"
+                  note="Originality, licensing and other signals outside the two sections above."
+                  empty="Nothing in this section matches the filter."
+                  items={filtered.filter((f) => reportSection(f) === "other")}
+                  total={actionable.filter((f) => reportSection(f) === "other").length}
+                  onSeek={seek}
+                  highlight={highlight}
+                />
+              )}
             </div>
           </section>
 
@@ -620,6 +636,59 @@ function ReviewDashboard({ analysis, onReload }: { analysis: Analysis; onReload:
           <p className="text-[11px] text-slate-400">Current stage: {STAGE_LABEL[analysis.stage] ?? analysis.stage}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FindingSection({
+  id,
+  title,
+  note,
+  empty,
+  items,
+  total,
+  onSeek,
+  highlight,
+}: {
+  id: string;
+  title: string;
+  note: string;
+  empty: string;
+  items: Finding[];
+  total: number;
+  onSeek: (t: number) => void;
+  highlight: string | null;
+}) {
+  const grouped = SEVERITY_ORDER.map((sev) => ({
+    sev,
+    items: items
+      .filter((f) => f.severity === sev)
+      .sort((a, b) => Number(a.rights_status != null) - Number(b.rights_status != null)),
+  })).filter((g) => g.items.length > 0);
+  const hiddenByFilter = total > 0 && items.length === 0;
+  return (
+    <div id={id} className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">
+          {title} <span className="font-normal text-slate-400">({total})</span>
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">{note}</p>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-slate-600">{hiddenByFilter ? "Nothing in this section matches the filter." : empty}</p>
+      ) : (
+        grouped.map((g) => (
+          <div key={g.sev} className="space-y-3">
+            <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <span className={`h-2 w-2 rounded-full ${sevDot[g.sev]}`} />
+              {SEVERITY_LABEL[g.sev]} · {g.items.length}
+            </h4>
+            {g.items.map((f) => (
+              <FindingCard key={f.id} finding={f} onSeek={onSeek} highlighted={highlight === f.id} />
+            ))}
+          </div>
+        ))
+      )}
     </div>
   );
 }

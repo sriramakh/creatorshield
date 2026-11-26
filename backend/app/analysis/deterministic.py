@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.analysis.community_guidelines import is_finance_claim, run_community_guideline_checks
 from app.analysis.disclosure import caption_disclosure, disclosure_sentences
 from app.schemas import FindingDraft
 
@@ -220,7 +221,13 @@ def run_deterministic_checks(
         )
 
     # 2. Strong efficacy / guarantee claims ----------------------------------
-    health_hits = _matches([i for i in items if i.source != "hashtags"], _HEALTH_RE)
+    # A finance "guaranteed returns" line is a community-guideline scam flag, not a
+    # medical-cure claim. Leave it to that check when "guarantee" is the only hit.
+    health_hits = [
+        hit
+        for hit in _matches([i for i in items if i.source != "hashtags"], _HEALTH_RE)
+        if not _finance_guarantee_only(hit)
+    ]
     if health_hits:
         start, end = _span(health_hits)
         findings.append(
@@ -250,6 +257,8 @@ def run_deterministic_checks(
                 requires_human_review=True,
             )
         )
+
+    findings.extend(run_community_guideline_checks(platform, items))
 
     # 3. YouTube hashtag limit -------------------------------------------------
     if platform == "youtube_shorts" and len(hashtags) > YOUTUBE_HASHTAG_LIMIT:
@@ -372,7 +381,8 @@ def run_deterministic_checks(
                 title="Video frames, speech and audio were not analysed",
                 explanation=(
                     f"Only {what} were available for this review. Anything shown or said "
-                    "inside the video - including music - was not checked."
+                    "inside the video - including music, nudity, violence and other "
+                    "visual-only risks - was not checked."
                 ),
                 suggested_action="Upload the video file for a full analysis.",
                 requires_human_review=False,
@@ -421,4 +431,41 @@ def run_deterministic_checks(
             requires_human_review=False,
         )
     )
+    if analysis_mode in {"full_video", "cross_checked"}:
+        findings.append(
+            FindingDraft(
+                source="deterministic",
+                category="community_guidelines",
+                finding_type="cannot_check",
+                severity="info",
+                confidence="high",
+                title="Imagery was not classified for community-guideline risks",
+                explanation=(
+                    "The community-guideline check reads the transcript, on-screen text, "
+                    "caption and hashtags. It does not classify frames, so nudity, graphic "
+                    "violence, weapons and other visual-only risks are missed unless words "
+                    "mention them. When an AI review runs, it sees sampled frames only, and "
+                    "brief moments between samples can still be missed."
+                ),
+                suggested_action=(
+                    "Watch the cut yourself for anything the words do not mention. "
+                    "Do not treat a clear wording check as a clearance of the picture."
+                ),
+                policy_rule_ids=(
+                    ["YT-CG-OVERVIEW"] if platform == "youtube_shorts" else ["META-CS-OVERVIEW"]
+                ),
+                requires_human_review=False,
+            )
+        )
     return findings
+
+
+def _finance_guarantee_only(hit: tuple[TextItem, str]) -> bool:
+    item, match = hit
+    if not re.fullmatch(r"guarantee[sd]?", match, re.IGNORECASE):
+        return False
+    if not is_finance_claim(item.text):
+        return False
+    return not any(
+        pat.search(item.text) for pat in _HEALTH_RE if pat.pattern != r"\bguarantee[sd]?\b"
+    )

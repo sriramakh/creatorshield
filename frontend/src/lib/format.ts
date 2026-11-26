@@ -48,6 +48,31 @@ export const RISK_STYLE: Record<RiskLevel, { text: string; bg: string; ring: str
   high: { text: "text-red-700", bg: "bg-red-50", ring: "ring-red-200", label: "High" },
 };
 
+export type ReportSection = "community" | "disclosure" | "other";
+
+const COMMUNITY_RULES = new Set(["YT-MON-AD-FRIENDLY", "YT-HASHTAGS"]);
+
+/** Matches backend/app/reports/sections.py. Uses the API field when the server sent one. */
+export function reportSection(f: {
+  category: string;
+  policy_rule_ids: string[];
+  report_section?: string;
+}): ReportSection {
+  if (f.report_section === "community" || f.report_section === "disclosure" || f.report_section === "other") {
+    return f.report_section;
+  }
+  if (f.category === "disclosure") return "disclosure";
+  if (f.category === "community_guidelines" || f.category === "harmful_content") return "community";
+  if (
+    f.policy_rule_ids.some(
+      (id) => COMMUNITY_RULES.has(id) || id.startsWith("YT-CG-") || id.startsWith("META-CS-"),
+    )
+  ) {
+    return "community";
+  }
+  return "other";
+}
+
 export const SOURCE_LABEL: Record<string, string> = {
   upload: "Uploaded file",
   instagram: "Instagram import",
