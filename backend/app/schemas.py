@@ -158,6 +158,8 @@ class FindingOut(BaseModel):
     validation_notes: list[str]
     rights_status: str | None = None
     rights_note: str | None = None
+    # Derived at serialisation. Not stored. disclosure stays separate from community flags.
+    report_section: Literal["community", "disclosure", "other"] = "other"
 
 
 class AnalysisSummaryOut(BaseModel):

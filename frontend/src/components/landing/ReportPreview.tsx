@@ -10,6 +10,14 @@ const FINDINGS = [
     from: "Rights ledger",
   },
   {
+    at: "0:12",
+    sev: "High",
+    tone: "bg-red-500/15 text-red-300 ring-red-400/30",
+    area: "Community guidelines",
+    text: "Risk flag: “guaranteed 20% returns, risk-free”",
+    from: "Speech",
+  },
+  {
     at: "0:21",
     sev: "Medium",
     tone: "bg-amber-500/15 text-amber-200 ring-amber-400/30",

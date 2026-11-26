@@ -356,7 +356,7 @@ const FEATURES = [
   {
     icon: BookIcon,
     t: "Citations you can trust",
-    d: "35 rules written from official YouTube, Instagram, Meta and ASCI pages, each dated. The AI cannot cite anything outside the library.",
+    d: "42 rules written from official YouTube, Instagram, Meta and ASCI pages, each dated. The AI cannot cite anything outside the library.",
   },
   {
     icon: FingerprintIcon,

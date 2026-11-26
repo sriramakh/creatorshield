@@ -223,7 +223,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Where do the policy citations come from?",
-    a: "From a versioned library of 35 rules, each written from an official YouTube, Instagram, Meta or ASCI page that was read and dated. The AI can only cite rules in that library; anything else is thrown away.",
+    a: "From a versioned library of 42 rules, each written from an official YouTube, Instagram, Meta or ASCI page that was read and dated. The AI can only cite rules in that library; anything else is thrown away.",
   },
   {
     q: "Do you scrape or download my posts?",

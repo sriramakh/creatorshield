@@ -20,6 +20,7 @@ from app.media.probe import MediaError, probe, validate_duration, validate_exten
 from app.models import Analysis, Finding
 from app.policies.kb import get_kb
 from app.reports.render import render_html, render_json
+from app.reports.sections import section_for
 from app.schemas import (
     CATEGORY_LABELS,
     AnalysisOut,
@@ -67,6 +68,7 @@ def serialize(analysis: Analysis) -> AnalysisOut:
     for f in analysis.findings:
         out = FindingOut.model_validate(f)
         out.category_label = CATEGORY_LABELS.get(f.category, f.category)
+        out.report_section = section_for(f.category, list(f.policy_rule_ids))
         for rid in f.policy_rule_ids:
             rule = kb.get(rid)
             if rule:

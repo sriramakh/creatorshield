@@ -8,6 +8,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app.reports.sections import section_for
 from app.schemas import AnalysisOut
 
 _env = Environment(
@@ -39,6 +40,9 @@ _env.filters["ts"] = fmt_time
 
 def render_html(analysis: AnalysisOut) -> str:
     template = _env.get_template("report.html.j2")
+    for finding in analysis.findings:
+        finding.report_section = section_for(finding.category, list(finding.policy_rule_ids))
+    actionable = [f for f in analysis.findings if f.finding_type != "cannot_check"]
     return template.render(
         a=analysis,
         platform_name=PLATFORM_NAMES.get(analysis.platform, analysis.platform),
@@ -50,7 +54,10 @@ def render_html(analysis: AnalysisOut) -> str:
         }.get(analysis.source, analysis.source),
         type_labels=TYPE_LABELS,
         generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
-        actionable=[f for f in analysis.findings if f.finding_type != "cannot_check"],
+        actionable=actionable,
+        community=[f for f in actionable if f.report_section == "community"],
+        disclosure=[f for f in actionable if f.report_section == "disclosure"],
+        other=[f for f in actionable if f.report_section == "other"],
         cannot_check=[f for f in analysis.findings if f.finding_type == "cannot_check"],
     )
 
