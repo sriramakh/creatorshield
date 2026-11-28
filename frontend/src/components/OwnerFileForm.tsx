@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { attachOwnerFile } from "@/lib/api";
-import { UploadIcon } from "./icons";
+import { Upload, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { attachOwnerFile, errorMessage, isAbortError } from "@/lib/api";
+import { fmtBytes } from "@/lib/format";
+import { Button, Callout, Field, Progress } from "./ui";
+import { FilePicker } from "./ui/FilePicker";
 
 const ACCEPT = ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm";
 
+/** Attach the creator's own file to an imported post (full review, cross-checked against the post). */
 export function OwnerFileForm({
   analysisId,
   onStarted,
@@ -19,55 +23,63 @@ export function OwnerFileForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function submit() {
     if (!file) return;
     setBusy(true);
     setError(null);
     setProgress(0);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      await attachOwnerFile(analysisId, file, setProgress);
+      await attachOwnerFile(analysisId, file, setProgress, controller.signal);
+      setFile(null);
+      setBusy(false);
       onStarted();
     } catch (e) {
-      setError((e as Error).message);
+      if (!isAbortError(e)) setError(errorMessage(e));
       setBusy(false);
     }
   }
 
   return (
-    <div className="mt-3 space-y-2">
-      <label className="block text-sm font-medium">
-        {replace ? "Replace the file and cross-check again" : "Original video file"}
-        <input
-          type="file"
-          accept={ACCEPT}
-          disabled={busy}
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-800"
-        />
-      </label>
-      <p className="text-xs opacity-80">
-        Use the file you published. YouTube Studio and Instagram&apos;s &quot;Download your information&quot; export both
-        provide it. The platform copy is not downloaded. Songs are not identified.
-      </p>
+    <div className="space-y-3">
+      <Field
+        label={replace ? "Replace the file and cross-check again" : "Original video file"}
+        hint="Use the file you published: YouTube Studio and Instagram’s “Download your information” both provide it. The platform copy is not downloaded and songs are not identified."
+      >
+        {(p) => <FilePicker {...p} accept={ACCEPT} disabled={busy} files={file ? [file] : []} onFiles={(f) => setFile(f[0] ?? null)} />}
+      </Field>
       {busy && (
-        <div className="flex items-center gap-2" aria-live="polite">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
-            <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex justify-between text-[13px] text-ink-2">
+            <span>{progress < 1 ? "Uploading…" : "Starting the review…"}</span>
+            {file && progress < 1 && (
+              <span className="tabular text-ink-3">
+                {fmtBytes(file.size * progress)} of {fmtBytes(file.size)}
+              </span>
+            )}
           </div>
-          <span className="text-xs tabular-nums">{progress < 1 ? `Uploading ${Math.round(progress * 100)}%` : "Processing…"}</span>
+          <Progress value={progress < 1 ? progress * 100 : null} label="Upload progress" />
         </div>
       )}
-      {error && <p className="text-sm font-medium text-red-700">{error}</p>}
-      <button
-        type="button"
-        disabled={!file || busy}
-        onClick={submit}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300"
-      >
-        <UploadIcon className="h-4 w-4" />
-        {busy ? "Starting review…" : "Review this file against the post"}
-      </button>
+      {error && (
+        <Callout tone="danger" title="The file was not attached">
+          {error}
+        </Callout>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" size="sm" leadingIcon={<Upload />} disabled={!file || busy} loading={busy && progress >= 1} onClick={submit}>
+          Review this file against the post
+        </Button>
+        {busy && progress < 1 && (
+          <Button size="sm" variant="ghost" leadingIcon={<X />} onClick={() => abortRef.current?.abort()}>
+            Cancel upload
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,29 +1,8 @@
-import type { Confidence, FindingType, Platform, RiskLevel, Severity } from "./api";
-
-export const PLATFORM_LABEL: Record<Platform, string> = {
-  youtube_shorts: "YouTube Shorts",
-  instagram_reels: "Instagram Reels",
-};
+import type { Confidence, FindingType, Severity } from "./api";
 
 export const LANGUAGE_LABEL: Record<string, string> = { en: "English", hi: "Hindi" };
 
-export const SEVERITY_LABEL: Record<Severity, string> = {
-  critical: "Critical",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-  info: "Info",
-};
-
 export const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
-
-export const SEVERITY_STYLE: Record<Severity, { badge: string; bar: string; dot: string }> = {
-  critical: { badge: "bg-red-700 text-white", bar: "border-l-red-700", dot: "bg-red-700" },
-  high: { badge: "bg-red-500 text-white", bar: "border-l-red-500", dot: "bg-red-500" },
-  medium: { badge: "bg-amber-500 text-white", bar: "border-l-amber-500", dot: "bg-amber-500" },
-  low: { badge: "bg-sky-600 text-white", bar: "border-l-sky-600", dot: "bg-sky-600" },
-  info: { badge: "bg-slate-400 text-white", bar: "border-l-slate-300", dot: "bg-slate-400" },
-};
 
 export const TYPE_LABEL: Record<FindingType, string> = {
   observed_evidence: "Observed evidence",
@@ -40,13 +19,6 @@ export const TYPE_HELP: Record<FindingType, string> = {
 };
 
 export const CONFIDENCE_LEVEL: Record<Confidence, number> = { low: 1, medium: 2, high: 3 };
-
-export const RISK_STYLE: Record<RiskLevel, { text: string; bg: string; ring: string; label: string }> = {
-  low: { text: "text-emerald-700", bg: "bg-emerald-50", ring: "ring-emerald-200", label: "Low" },
-  moderate: { text: "text-amber-700", bg: "bg-amber-50", ring: "ring-amber-200", label: "Moderate" },
-  elevated: { text: "text-orange-700", bg: "bg-orange-50", ring: "ring-orange-200", label: "Elevated" },
-  high: { text: "text-red-700", bg: "bg-red-50", ring: "ring-red-200", label: "High" },
-};
 
 export type ReportSection = "community" | "disclosure" | "other";
 
@@ -73,6 +45,11 @@ export function reportSection(f: {
   return "other";
 }
 
+/** Display title for a review: platform title, else the caption's first line. */
+export function reviewTitle(a: { source_title?: string | null; caption?: string | null }): string {
+  return a.source_title?.trim() || a.caption?.trim().split(/\r?\n/)[0] || "Untitled video";
+}
+
 export const SOURCE_LABEL: Record<string, string> = {
   upload: "Uploaded file",
   instagram: "Instagram import",
@@ -80,7 +57,7 @@ export const SOURCE_LABEL: Record<string, string> = {
 };
 
 export const MODE_LABEL: Record<string, string> = {
-  full_video: "Full video analysis",
+  full_video: "Full video review",
   caption_thumbnail: "Caption + thumbnail only",
   metadata_only: "Metadata + captions only",
   cross_checked: "Full review, cross-checked",
@@ -105,9 +82,11 @@ export const STAGE_LABEL: Record<string, string> = {
 };
 
 export function fmtTime(seconds: number | null | undefined): string {
-  if (seconds == null || Number.isNaN(seconds)) return "—";
-  const m = Math.floor(seconds / 60);
-  const s = seconds - m * 60;
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  // Round to tenths first so 59.97 s becomes 1:00.0, not 0:60.0.
+  const tenths = Math.round(Math.max(0, seconds) * 10);
+  const m = Math.floor(tenths / 600);
+  const s = (tenths - m * 600) / 10;
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }
 

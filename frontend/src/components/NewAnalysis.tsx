@@ -1,45 +1,41 @@
 "use client";
 
+import { Link2, Upload } from "lucide-react";
 import { useState } from "react";
+import { AiLimitCallout } from "./AiLimitCallout";
 import { ImportFromAccount } from "./ImportFromAccount";
-import { SystemStatusBanner } from "./SystemStatusBanner";
+import { PageContainer } from "./shell/AppShell";
+import { PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "./ui";
 import { UploadForm } from "./UploadForm";
 
-type Tab = "upload" | "account";
+type Source = "upload" | "account";
 
 export function NewAnalysis() {
-  const [tab, setTab] = useState<Tab>("upload");
+  const [source, setSource] = useState<Source>("upload");
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">New analysis</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Check a video before you publish it, or audit a post you&apos;ve already published. Findings are reviewed against
-          official platform policies.
-        </p>
-      </div>
-      <SystemStatusBanner />
-      <div role="tablist" className="inline-flex rounded-lg bg-slate-100 p-1">
-        {(
-          [
-            ["upload", "Upload a file", "Full analysis · pre-publish"],
-            ["account", "From your account", "Instagram / YouTube posts"],
-          ] as const
-        ).map(([key, label, sub]) => (
-          <button
-            key={key}
-            role="tab"
-            type="button"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={`rounded-md px-4 py-2 text-left transition ${tab === key ? "bg-white shadow-sm" : "text-slate-600"}`}
-          >
-            <div className="text-sm font-semibold">{label}</div>
-            <div className="text-[11px] text-slate-500">{sub}</div>
-          </button>
-        ))}
-      </div>
-      {tab === "upload" ? <UploadForm /> : <ImportFromAccount />}
-    </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="New review"
+        description="Check a video before you publish it, or audit a post you have already published. Findings cite official platform policies."
+      />
+      <AiLimitCallout />
+      <Tabs value={source} onValueChange={(v) => setSource(v as Source)}>
+        <TabsList aria-label="Video source">
+          <TabsTrigger value="upload">
+            <Upload className="size-4" aria-hidden /> Upload a file
+          </TabsTrigger>
+          <TabsTrigger value="account">
+            <Link2 className="size-4" aria-hidden /> From your account
+          </TabsTrigger>
+        </TabsList>
+        {/* Kept mounted so switching tabs never cancels an upload in progress. */}
+        <TabsContent value="upload" forceMount className="data-[state=inactive]:hidden">
+          <UploadForm />
+        </TabsContent>
+        <TabsContent value="account">
+          <ImportFromAccount />
+        </TabsContent>
+      </Tabs>
+    </PageContainer>
   );
 }

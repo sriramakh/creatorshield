@@ -1,32 +1,32 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { CircleCheck, Plug, Unplug } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { api, type Connection, type ConnectedPlatform, type ConnectionsResponse } from "@/lib/api";
+import { api, errorMessage, safeUrl, type Connection, type ConnectedPlatform, type ConnectionsResponse } from "@/lib/api";
 import { fmtDate } from "@/lib/format";
-import { CheckIcon } from "./icons";
-import { Banner, Card, Skeleton } from "./ui";
+import { PageContainer } from "./shell/AppShell";
+import { Badge, Button, Callout, ConfirmDialog, CopyButton, ErrorNotice, PageHeader, Skeleton, useToast } from "./ui";
 
 const CALLBACK_MESSAGES: Record<string, string> = {
   denied: "Access was not granted, so nothing was connected.",
-  state: "The sign-in link expired or was already used. Please try connecting again.",
+  state: "The sign-in link expired or was already used. Connect again.",
   not_configured: "This platform is not configured on the server yet.",
-  failed: "The platform did not complete the sign-in. Please try again.",
+  failed: "The platform did not complete the sign-in. Try again.",
 };
 
 const PLATFORM_INFO: Record<
   ConnectedPlatform,
-  { name: string; badge: string; gets: ReactNode; requires: string; setup: string[] }
+  { name: string; mark: string; gets: ReactNode; requires: string; setup: string[] }
 > = {
   instagram: {
     name: "Instagram",
-    badge: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400",
+    mark: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400",
     gets: (
       <>
-        <strong>Full video analysis</strong> of your own Reels. Instagram withholds the video file for Reels that use
-        licensed audio (including its audio library) or are copyright-flagged — those get a{" "}
-        <strong>caption + thumbnail</strong> review instead. Attach the original file on the report to review the
-        frames, speech and audio, and to cross-check them against the post.
+        <strong className="font-semibold text-ink">Full video review</strong> of your own Reels. Instagram withholds the file
+        for Reels with licensed audio (including its audio library) or copyright flags; those get a caption and thumbnail review
+        instead. Attach the original on the report to review frames, speech and audio and cross-check them against the post.
       </>
     ),
     requires: "An Instagram professional account (Creator or Business).",
@@ -34,18 +34,18 @@ const PLATFORM_INFO: Record<
       "Create an app at developers.facebook.com and add the “Instagram” product (API setup with Instagram login).",
       "Add the redirect URI below to “Valid OAuth Redirect URIs” (exact match).",
       "Add your Instagram account as an app tester (development mode) and accept the invite in Instagram.",
-      "Put INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET in backend/.env and restart.",
+      "Set INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET on the server and restart it.",
     ],
   },
   youtube: {
     name: "YouTube",
-    badge: "bg-red-600",
+    mark: "bg-[#e62117]",
     gets: (
       <>
-        <strong>Metadata audit</strong> of your own videos — title, description, tags and hashtags, including private
-        drafts uploaded for review. YouTube&apos;s API policies don&apos;t allow downloading video or audio, so frames and
-        speech are <strong>not</strong> analysed. Attach the original file on the report for a full review
-        cross-checked against the video&apos;s title, description and captions.
+        <strong className="font-semibold text-ink">Metadata audit</strong> of your own videos: title, description, tags and
+        hashtags, including private drafts. YouTube’s API policies do not allow downloading video or audio, so frames and speech
+        are not reviewed. Attach the original on the report for a full review cross-checked against the title, description and
+        captions.
       </>
     ),
     requires: "A Google account with a YouTube channel.",
@@ -53,10 +53,22 @@ const PLATFORM_INFO: Record<
       "In Google Cloud Console, enable “YouTube Data API v3”.",
       "Configure the OAuth consent screen (Testing mode; add yourself as a test user).",
       "Create an OAuth client of type “Web application” with the redirect URI below.",
-      "Put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env and restart.",
+      "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server and restart it.",
     ],
   },
 };
+
+/** Platform sign-in pages are always https. Plain http is accepted only on this machine
+ *  (local development and the fake-platform end-to-end test). */
+function isSignInAddress(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "https:") return true;
+    return u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
+  } catch {
+    return false;
+  }
+}
 
 export function ConnectionsPage() {
   const params = useSearchParams();
@@ -64,7 +76,13 @@ export function ConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.connections().then(setData).catch((e: Error) => setError(e.message));
+    api
+      .connections()
+      .then((d) => {
+        setData(d);
+        setError(null);
+      })
+      .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
 
@@ -72,36 +90,37 @@ export function ConnectionsPage() {
   const callbackError = params.get("error");
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Connected accounts</h1>
-        <p className="mt-1 max-w-3xl text-sm text-slate-500">
-          Connect your own accounts to analyse posts you have already published (or uploaded privately). CreatorShield uses
-          only the platforms&apos; official APIs, never scrapes, and can only analyse content owned by the connected account.
-          Disconnecting deletes the stored access and every analysis imported through that account.
-        </p>
-      </div>
+    <PageContainer className="max-w-5xl space-y-6">
+      <PageHeader
+        title="Connected accounts"
+        description="Connect your own accounts to review posts you have already published or uploaded privately. Only official APIs are used, nothing is scraped, and only content owned by the connected account can be reviewed. Disconnecting deletes the stored access and every review imported through that account."
+      />
 
       {connected && (
-        <Banner tone="info" title={`${PLATFORM_INFO[connected as ConnectedPlatform]?.name ?? connected} connected`}>
-          You can now analyse your posts from <strong>New analysis → From your account</strong>.
-        </Banner>
+        <Callout tone="success" title={`${PLATFORM_INFO[connected as ConnectedPlatform]?.name ?? connected} connected`}>
+          You can now review your posts from New review → From your account.
+        </Callout>
       )}
       {callbackError && (
-        <Banner tone="danger" title="Connection not completed">
+        <Callout tone="danger" title="The connection was not completed">
           {CALLBACK_MESSAGES[callbackError] ?? CALLBACK_MESSAGES.failed}
-        </Banner>
+        </Callout>
       )}
-      {error && <Banner tone="danger" title="Could not load connections">{error}</Banner>}
+      {error && <ErrorNotice title="Could not load connected accounts" message={error} onRetry={load} />}
       {data && !data.encryption_configured && (
-        <Banner tone="warning" title="Token encryption key missing">
-          Set TOKEN_ENCRYPTION_KEY in backend/.env (scripts/dev.sh generates one) before connecting accounts.
-        </Banner>
+        <Callout tone="warning" title="Token encryption key missing">
+          Set TOKEN_ENCRYPTION_KEY on the server before connecting accounts.
+        </Callout>
       )}
 
-      {!data && !error && <Skeleton className="h-64 w-full" />}
-      {data && (
+      {!data && !error && (
         <div className="grid gap-6 md:grid-cols-2">
+          <Skeleton className="h-72 w-full rounded-[10px]" />
+          <Skeleton className="h-72 w-full rounded-[10px]" />
+        </div>
+      )}
+      {data && (
+        <div className="grid items-start gap-6 md:grid-cols-2">
           {(["instagram", "youtube"] as const).map((p) => (
             <PlatformCard
               key={p}
@@ -115,7 +134,7 @@ export function ConnectionsPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -143,100 +162,122 @@ function PlatformCard({
     setErr(null);
     try {
       const { authorization_url } = await api.authorize(platform);
-      window.location.assign(authorization_url);
+      const target = safeUrl(authorization_url);
+      if (!target || !isSignInAddress(target)) throw new Error("The server returned an invalid sign-in address.");
+      window.location.assign(target);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errorMessage(e));
       setBusy(false);
     }
   }
 
   return (
-    <Card className="flex flex-col p-5" label={`${info.name} account`}>
-      <div className="flex items-center gap-3">
-        <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold text-white ${info.badge}`}>
+    <section aria-label={`${info.name} account`} className="flex flex-col rounded-[10px] border border-line bg-surface">
+      <div className="flex items-center gap-3 border-b border-line px-5 py-4">
+        <span className={`flex size-10 items-center justify-center rounded-[10px] text-sm font-bold text-white ${info.mark}`} aria-hidden>
           {info.name[0]}
         </span>
-        <div>
-          <h2 className="font-semibold">{info.name}</h2>
-          <p className="text-xs text-slate-500">{info.requires}</p>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[15px] font-semibold">{info.name}</h2>
+          <p className="text-[13px] text-ink-3">{info.requires}</p>
         </div>
+        {configured ? (
+          <Badge tone={connections.length ? "success" : "neutral"} icon={connections.length ? CircleCheck : undefined}>
+            {connections.length ? `${connections.length} connected` : "Not connected"}
+          </Badge>
+        ) : (
+          <Badge tone="medium">Setup required</Badge>
+        )}
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-slate-600">{info.gets}</p>
-      {platform === "youtube" && (
-        <p className="mt-2 text-[12px] text-slate-500">
-          Captions: {captionsScope ? "requested (needs the broader “manage your YouTube account” permission)" : "off — enable with YOUTUBE_CAPTIONS_SCOPE=true (requests a broader permission)"}.
-        </p>
-      )}
-
-      <div className="mt-5 flex-1 space-y-2">
-        {connections.map((c) => (
-          <ConnectedRow key={c.id} c={c} onChange={onChange} />
-        ))}
+      <div className="flex-1 space-y-4 p-5">
+        <p className="text-[13px] leading-5 text-ink-2">{info.gets}</p>
+        {platform === "youtube" && (
+          <p className="text-[13px] text-ink-3">
+            Captions:{" "}
+            {captionsScope
+              ? "requested (needs the broader “manage your YouTube account” permission)."
+              : "off. Enable with YOUTUBE_CAPTIONS_SCOPE=true (requests a broader permission)."}
+          </p>
+        )}
+        {connections.length > 0 && (
+          <ul className="divide-y divide-line rounded-[8px] border border-line">
+            {connections.map((c) => (
+              <ConnectedRow key={c.id} c={c} onChange={onChange} />
+            ))}
+          </ul>
+        )}
+        {err && (
+          <Callout tone="danger" title="Could not start the connection">
+            {err}
+          </Callout>
+        )}
+        {!configured && (
+          <details className="rounded-[8px] border border-dashed border-line-strong bg-surface-2 p-3 text-[13px] text-ink-2">
+            <summary className="cursor-pointer font-semibold text-ink">How to set it up</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-4">
+              {info.setup.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ol>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-ink-3">Redirect URI</span>
+              <code className="min-w-0 flex-1 truncate rounded-[4px] bg-surface px-1.5 py-0.5 font-mono text-[12px]">{redirectUri}</code>
+              <CopyButton value={redirectUri} label="Copy redirect URI" />
+            </div>
+          </details>
+        )}
       </div>
-
-      {err && <p className="mt-3 text-xs text-red-600">{err}</p>}
-
-      {configured ? (
-        <button
-          type="button"
-          onClick={connect}
-          disabled={busy}
-          className="mt-5 inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-300"
-        >
-          {busy ? "Redirecting…" : connections.length ? `Connect another ${info.name} account` : `Connect ${info.name}`}
-        </button>
-      ) : (
-        <details className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-[12px] text-slate-600">
-          <summary className="cursor-pointer font-semibold text-slate-800">Setup required — show steps</summary>
-          <ol className="mt-2 list-decimal space-y-1 pl-4">
-            {info.setup.map((s) => <li key={s}>{s}</li>)}
-          </ol>
-          <div className="mt-2">
-            Redirect URI: <code className="break-all rounded bg-white px-1 py-0.5 font-mono text-[11px]">{redirectUri}</code>
-          </div>
-        </details>
+      {configured && (
+        <div className="border-t border-line px-5 py-4">
+          <Button variant={connections.length ? "secondary" : "primary"} leadingIcon={<Plug />} loading={busy} onClick={connect}>
+            {busy ? "Redirecting…" : connections.length ? `Connect another ${info.name} account` : `Connect ${info.name}`}
+          </Button>
+        </div>
       )}
-    </Card>
+    </section>
   );
 }
 
 function ConnectedRow({ c, onChange }: { c: Connection; onChange: () => void }) {
+  const toast = useToast();
   const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState(false);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2">
-      <div className="flex items-center gap-2 text-sm">
-        <CheckIcon className="h-4 w-4 text-emerald-600" />
-        <span className="font-semibold">{c.display_name}</span>
-        <span className="text-[11px] text-slate-500">since {fmtDate(c.created_at)}</span>
-        {c.platform === "youtube" && c.captions_enabled && (
-          <span className="rounded bg-white px-1.5 text-[10px] font-medium text-slate-600">captions</span>
-        )}
+    <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        <CircleCheck className="size-4 shrink-0 text-success-fg" aria-hidden />
+        <span className="truncate font-semibold">{c.display_name}</span>
+        <span className="text-[12px] text-ink-3">since {fmtDate(c.created_at)}</span>
+        {c.platform === "youtube" && c.captions_enabled && <Badge>captions</Badge>}
       </div>
-      {confirm ? (
-        <span className="flex items-center gap-1 text-xs">
-          <span className="text-red-800">Disconnect and delete its imported analyses?</span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              await api.disconnect(c.id).catch(() => {});
-              onChange();
-            }}
-            className="rounded bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700"
-          >
-            Disconnect
-          </button>
-          <button type="button" onClick={() => setConfirm(false)} className="px-1 text-slate-600">
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button type="button" onClick={() => setConfirm(true)} className="text-xs font-medium text-slate-600 hover:text-red-700">
-          Disconnect
-        </button>
-      )}
-    </div>
+      <Button size="sm" variant="ghost" leadingIcon={<Unplug />} onClick={() => setConfirm(true)}>
+        Disconnect
+      </Button>
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={`Disconnect ${c.display_name}?`}
+        description="The stored access is revoked and every review imported through this account is deleted. This cannot be undone."
+        confirmLabel="Disconnect"
+        onConfirm={async () => {
+          const res = await api.disconnect(c.id);
+          const deleted = res?.deleted_analyses ? `${res.deleted_analyses} imported review${res.deleted_analyses === 1 ? " was" : "s were"} deleted. ` : "";
+          if (res?.revoked === false) {
+            const where =
+              c.platform === "youtube"
+                ? "Remove CreatorShield’s access at myaccount.google.com → Security → Your connections to third-party apps."
+                : "Remove the app in Instagram → Settings → Apps and websites.";
+            toast({
+              tone: "error",
+              title: `${c.display_name} was disconnected here, but access was not revoked`,
+              description: `${deleted}${res.revoke_error ? `${res.revoke_error} ` : ""}${where}`,
+              duration: 15000,
+            });
+          } else {
+            toast({ tone: "success", title: `${c.display_name} disconnected`, description: deleted || undefined });
+          }
+          onChange();
+        }}
+      />
+    </li>
   );
 }

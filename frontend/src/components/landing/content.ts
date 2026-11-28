@@ -1,3 +1,5 @@
+import { BRAND } from "@/lib/brand";
+
 // Landing-page copy. Every number and every named incident must point to a source in
 // SOURCES; scenarios that are not real cases are marked `illustrative`.
 
@@ -121,7 +123,7 @@ export type CaseStudy = {
   title: string;
   happened: string;
   flagged: string[];
-  // Heading over `flagged`; defaults to "What CreatorShield checks for".
+  // Heading over `flagged`; defaults to "What a review checks for".
   flaggedTitle?: string;
   limits: string;
   sources: SourceId[];
@@ -135,13 +137,14 @@ export const CASES: CaseStudy[] = [
     title: "India's most-liked video, gone in a week",
     happened:
       "The 'YouTube vs TikTok: The End' roast became the most-liked YouTube video in India within days, with over 6.7 million likes. YouTube removed it after mass reports; coverage tied the removal to the harassment and cyberbullying policy and to slurs in the video.",
+    flaggedTitle: "Illustration: how a review treats content like this",
     flagged: [
-      "Slurs and targeted insults in the transcript, each pinned to its timestamp",
-      "Cited YouTube's harassment and hate speech policies, with the clause it matched",
-      "Suggested cuts and rewordings that keep the joke without the slur",
+      "Slurs and targeted insults in a transcript are flagged, each pinned to its timestamp",
+      "Each flag cites the matching YouTube harassment or hate-speech rule from the policy library",
+      "The report suggests cuts or rewording that would keep the joke without the slur",
     ],
     limits:
-      "Satire and roasts get a context review, not an automatic pass or fail. A human still decides where the line is.",
+      `${BRAND.name} was not run on this video. Satire and roasts get a context review, not an automatic pass or fail, and a human still decides where the line is.`,
     sources: ["carryBI", "carryQuint"],
   },
   {
@@ -152,7 +155,7 @@ export const CASES: CaseStudy[] = [
     happened:
       "Instagram permanently disabled about 30 meme accounts with over 30 million followers between them, including pages with 13 million and 8 million followers. Instagram cited multiple policy violations; much of the coverage pointed to pages built on reposting other people's content.",
     flagged: [
-      "Other accounts' @handles and watermarks visible in frames",
+      "Other accounts' @handles in on-screen text, and watermarks the AI review spots in sampled frames",
       "The same footage already in your catalogue, including mirrored copies",
       "A rights-ledger entry for every permission, so credited reposts are on record",
     ],
@@ -208,7 +211,7 @@ export const SCENARIOS: { who: string; risk: string; fix: string }[] = [
   {
     who: "Cricket edits page, 1M followers",
     risk: "Highlights with a broadcaster's scorebug visible from 0:12 to 0:41.",
-    fix: "Flagged as third-party broadcast footage. Either record the licence in the ledger or cut that segment.",
+    fix: "The broadcaster's name in the scorebug is flagged as third-party footage. Either record the licence in the ledger or cut that segment.",
   },
 ];
 
@@ -219,11 +222,11 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Does this replace YouTube's own Checks?",
-    a: "No. Use both. YouTube's checks look for Content ID matches and ad suitability after you upload. CreatorShield runs before you upload, on Instagram as well as YouTube, and also covers community guidelines, sponsorship disclosure, claims and your own licences.",
+    a: `No. Use both. YouTube's checks look for Content ID matches and ad suitability after you upload. ${BRAND.name} runs before you upload, on Instagram as well as YouTube, and also covers community guidelines, sponsorship disclosure, claims and your own licences.`,
   },
   {
     q: "Where do the policy citations come from?",
-    a: "From a versioned library of 42 rules, each written from an official YouTube, Instagram, Meta or ASCI page that was read and dated. The AI can only cite rules in that library; anything else is thrown away.",
+    a: "From a versioned library of rules, each written from an official YouTube, Instagram or Meta page, or a regulator’s page for the markets you select (India, the US, the UK), read and dated. The AI can only cite rules in that library; anything else is thrown away. Regulator guidance is advisory.",
   },
   {
     q: "Do you scrape or download my posts?",

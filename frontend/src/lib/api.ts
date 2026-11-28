@@ -1,6 +1,10 @@
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
-export type Platform = "youtube_shorts" | "instagram_reels";
+/** A platform ID from /api/config `platforms` (never hard-code the list). */
+export type Platform = string;
+/** An audience-market ID from /api/config `markets`, e.g. "IN". */
+export type MarketId = string;
+export type ReadinessVerdict = "ready" | "review" | "fix_first";
 export type Language = "en" | "hi";
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 export type FindingType =
@@ -13,6 +17,15 @@ export type RiskLevel = "low" | "moderate" | "elevated" | "high";
 export type Source = "upload" | "instagram" | "youtube";
 export type AnalysisMode = "full_video" | "caption_thumbnail" | "metadata_only" | "cross_checked";
 export type ConnectedPlatform = "instagram" | "youtube";
+
+/** Declared commercial relationship (backend/app/schemas.py SponsorshipInput). */
+export type SponsorshipRelationship = "unknown" | "none" | "paid" | "gifted" | "affiliate" | "employment" | "other";
+export interface Sponsorship {
+  relationship: SponsorshipRelationship;
+  sponsors: string[];
+}
+/** Limits enforced by SponsorshipInput: at most 10 names, each 1–100 characters. */
+export const SPONSOR_LIMITS = { maxSponsors: 10, maxNameLength: 100 } as const;
 
 export interface PolicyRef {
   id: string;
@@ -54,7 +67,7 @@ export interface Finding {
   rights_status: "covered" | "duplicate" | null;
   rights_note: string | null;
   /** Set by the API. Disclosure stays separate from community-guideline flags. */
-  report_section?: "community" | "disclosure" | "other";
+  report_section?: "community" | "disclosure" | "other" | "brief";
 }
 
 export interface TranscriptSegment {
@@ -109,6 +122,9 @@ export interface AnalysisSummary {
   analysis_mode: AnalysisMode;
   source_title: string | null;
   client_label: string | null;
+  markets: MarketId[];
+  /** Present on completed reviews. */
+  readiness_verdict: ReadinessVerdict | null;
 }
 
 export interface Analysis extends AnalysisSummary {
@@ -147,6 +163,157 @@ export interface Analysis extends AnalysisSummary {
   findings: Finding[];
   owner_supplied_media: boolean;
   provenance: Provenance | null;
+  /** Declared at upload/import; null for analyses created before declarations existed. */
+  sponsorship?: Sponsorship | null;
+  brief: BriefInput | null;
+  brief_check: BriefCheck | null;
+  readiness: Readiness | null;
+  caption_fix: CaptionFix | null;
+  market_disclosure: MarketDisclosure | null;
+}
+
+// ---------------------------------------------------------------------------- creator features
+
+export interface ChecklistItem {
+  key: "disclosure" | "community" | "claims" | "rights" | "brief" | "coverage" | "ai_review" | string;
+  label: string;
+  status: "pass" | "warn" | "fail" | "unknown";
+  detail: string;
+  finding_ids: string[];
+}
+
+export interface Readiness {
+  verdict: ReadinessVerdict;
+  headline: string;
+  blockers: number;
+  warnings: number;
+  checklist: ChecklistItem[];
+}
+
+export type DisclosureStatus = "clear" | "buried" | "unclear" | "none";
+
+export interface CaptionFix {
+  needed: boolean;
+  suggested_caption: string;
+  suggested_hashtags: string[];
+  label: string | null;
+  changes: string[];
+  note: string;
+  /** Status of the ORIGINAL caption per market. */
+  markets: Record<MarketId, DisclosureStatus>;
+}
+
+export interface MarketDisclosure {
+  labels: {
+    text: string;
+    kind: string;
+    kind_label: string;
+    opening: boolean;
+    denied: boolean;
+    clear_in: MarketId[];
+    unclear_in: MarketId[];
+  }[];
+  by_market: Record<MarketId, { status: DisclosureStatus; regulator: string; clear_labels: string[]; unclear_labels: string[] }>;
+}
+
+export interface BriefInput {
+  name: string;
+  brand: string;
+  must_say: string[];
+  must_not_say: string[];
+  required_hashtags: string[];
+  required_mentions: string[];
+  competitors: string[];
+  required_disclosure: string | null;
+  notes: string;
+}
+
+export interface Brief extends BriefInput {
+  id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BriefItemKind = "must_say" | "must_not_say" | "required_hashtag" | "required_mention" | "competitor" | "required_disclosure";
+
+export interface BriefCheck {
+  brand: string;
+  name: string;
+  scope: "video" | "caption_only";
+  items: {
+    kind: BriefItemKind;
+    text: string;
+    status: "met" | "missing" | "violated" | "unverified";
+    where: { source: string; ref_id: string; timestamp: number | null }[];
+  }[];
+  met: number;
+  total: number;
+  failed: number;
+  unverified: number;
+}
+
+export interface QuickCheckRequest {
+  platform: Platform;
+  markets: MarketId[];
+  caption: string;
+  hashtags: string[];
+  sponsorship?: Sponsorship;
+  brief_id?: string;
+  brief?: BriefInput;
+}
+
+export interface QuickCheckResponse {
+  platform: Platform;
+  markets: MarketId[];
+  findings: Finding[];
+  readiness: Readiness;
+  risk_score: number;
+  risk_level: RiskLevel;
+  caption_fix: CaptionFix;
+  market_disclosure: MarketDisclosure;
+  brief_check: BriefCheck | null;
+  not_checked: string[];
+  policy_kb_version: string;
+}
+
+export type WorkspaceMode = "creator" | "agency";
+
+export interface WorkspaceSettings {
+  mode: WorkspaceMode;
+  display_name: string;
+  default_platform: Platform;
+  default_markets: MarketId[];
+  default_language: Language;
+  onboarded: boolean;
+}
+
+export interface InsightSummary {
+  reviews: number;
+  ready: number;
+  review: number;
+  fix_first: number;
+  ready_rate: number | null;
+  avg_risk_score: number | null;
+  open_findings: number;
+}
+
+export interface Insights {
+  window_days: number;
+  generated_at: string;
+  stats_retention_days: number;
+  totals: InsightSummary;
+  previous: InsightSummary;
+  by_day: (InsightSummary & { date: string })[];
+  by_group: { group: string; label: string; findings: number; reviews: number }[];
+  by_severity: Record<Severity, number>;
+  by_platform: (InsightSummary & { platform: Platform; label: string })[];
+  by_market: { market: MarketId; label: string; reviews: number }[];
+  by_client: (InsightSummary & { client_label: string })[];
+}
+
+export interface Health {
+  status: "ok" | "degraded";
+  checks: Record<string, string | { version: string; rules: number }>;
 }
 
 export type RightsArea = "handle" | "broadcaster" | "brand" | "catalogue" | "music" | "web" | "youtube";
@@ -334,6 +501,33 @@ export interface ProvenanceStatus {
   catalogue: { entries: number; retention_days: number };
 }
 
+export interface PlatformInfo {
+  id: Platform;
+  label: string;
+  short_label: string;
+  family: string;
+  description: string;
+  short_form: boolean;
+}
+
+export interface MarketInfo {
+  id: MarketId;
+  label: string;
+  regulator: string;
+  summary: string;
+  /** The policy-library platform that holds this market's rules (e.g. "us_advisory"). */
+  kb_platform: string;
+}
+
+export interface Limits {
+  caption_max: number;
+  hashtags_max: number;
+  sponsors_max: number;
+  sponsor_name_max: number;
+  brief_items_max: number;
+  brief_item_max: number;
+}
+
 export interface PublicConfig {
   ai_provider: string;
   ai_model: string;
@@ -356,6 +550,11 @@ export interface PublicConfig {
   web_detection_configured: boolean;
   youtube_search_available: boolean;
   paid_lookups_monthly_budget_usd: number;
+  catalogue_max_seconds: number;
+  platforms: PlatformInfo[];
+  markets: MarketInfo[];
+  default_markets: MarketId[];
+  limits: Limits;
 }
 
 export interface Connection {
@@ -408,45 +607,177 @@ export interface PolicyKB {
   rules: PolicyRule[];
 }
 
+/** A failed API call. `status` is 0 for network failures; `detail` is the raw FastAPI detail. */
 export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
+  readonly status: number;
+  readonly detail: unknown;
+  /** From a Retry-After header (seconds), when the server sent one. */
+  readonly retryAfterMs: number | null;
+  constructor(message: string, status: number, detail?: unknown, retryAfterMs: number | null = null) {
     super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail ?? message;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "AbortError";
+}
+
+/** Network failures, timeouts, rate limits and server errors are worth retrying later. */
+export function isRetryable(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true;
+  return e.status === 0 || e.status === 408 || e.status === 429 || e.status >= 500;
+}
+
+export function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+const LOCATION_PREFIXES = new Set(["body", "query", "path", "form", "header"]);
+
+/** Turn a FastAPI `detail` (string, or a list of validation errors) into a readable sentence. */
+export function formatApiDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return null;
+        const { loc, msg } = item as { loc?: unknown; msg?: unknown };
+        const text = typeof msg === "string" ? msg.replace(/^Value error,\s*/i, "") : null;
+        if (!text) return null;
+        const field = Array.isArray(loc)
+          ? loc
+              .filter((p, i) => !(i === 0 && typeof p === "string" && LOCATION_PREFIXES.has(p)))
+              .map((p) => (typeof p === "number" ? `#${p + 1}` : String(p).replace(/_/g, " ")))
+              .join(" ")
+          : "";
+        return field ? `${field}: ${text}` : text;
+      })
+      .filter((p): p is string => Boolean(p));
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback;
+}
+
+// ---------------------------------------------------------------------------- sign-in state
+// The pilot deployment protects the API with HTTP Basic auth. A 401 means the browser's
+// stored login was rejected (for example after a password rotation); every 401 is reported
+// here so the app can show one sign-in notice instead of a generic error on each page.
+
+const authListeners = new Set<() => void>();
+let authRequired = false;
+
+function reportAuthRequired() {
+  if (authRequired) return;
+  authRequired = true;
+  authListeners.forEach((listener) => listener());
+}
+
+export function subscribeAuthRequired(listener: () => void): () => void {
+  authListeners.add(listener);
+  return () => {
+    authListeners.delete(listener);
+  };
+}
+
+export function isAuthRequired(): boolean {
+  return authRequired;
+}
+
+// ---------------------------------------------------------------------------- URLs
+
+/**
+ * Only http(s) URLs and same-origin paths may be rendered into href/src. Anything else
+ * (javascript:, data:, protocol-relative //host) from the API or a third party is dropped.
+ */
+export function safeUrl(url: string | null | undefined): string | undefined {
+  if (typeof url !== "string") return undefined;
+  const value = url.trim();
+  if (!value) return undefined;
+  if (value.startsWith("/")) {
+    return value.startsWith("//") || value.startsWith("/\\") ? undefined : value;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+export function safeYouTubeId(id: string | null | undefined): string | null {
+  return id && YOUTUBE_ID.test(id) ? id : null;
+}
+
+// ---------------------------------------------------------------------------- requests
+
+function failure(status: number, statusText: string, body: unknown, retryAfter: string | null): ApiError {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  const fallback = status === 401 ? "Sign in to continue." : statusText || `Request failed (${status})`;
+  if (status === 401) reportAuthRequired();
+  const seconds = retryAfter ? Number(retryAfter) : NaN;
+  return new ApiError(
+    formatApiDetail(detail, fallback),
+    status,
+    detail,
+    Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 600) * 1000 : null,
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init });
-  } catch {
-    throw new ApiError("Cannot reach the CreatorShield API. Is the backend running?", 0);
+  } catch (e) {
+    if (isAbortError(e)) throw e;
+    throw new ApiError("Cannot reach the CreatorShield API. Check your connection and that the backend is running.", 0);
   }
   if (!res.ok) {
-    let detail = res.statusText;
+    let body: unknown = null;
     try {
-      const body = await res.json();
-      detail = typeof body.detail === "string" ? body.detail : detail;
+      body = await res.json();
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(detail, res.status);
+    throw failure(res.status, res.statusText, body, res.headers.get("Retry-After"));
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
+const enc = encodeURIComponent;
+
+const json = (body: unknown, method = "POST"): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 export const api = {
+  settings: () => request<WorkspaceSettings>("/api/settings"),
+  updateSettings: (patch: Partial<WorkspaceSettings>) => request<WorkspaceSettings>("/api/settings", json(patch, "PUT")),
+  briefs: () => request<Brief[]>("/api/briefs"),
+  createBrief: (b: BriefInput) => request<Brief>("/api/briefs", json(b)),
+  updateBrief: (id: string, b: BriefInput) => request<Brief>(`/api/briefs/${enc(id)}`, json(b, "PUT")),
+  deleteBrief: (id: string) => request<void>(`/api/briefs/${enc(id)}`, { method: "DELETE" }),
+  quickCheck: (body: QuickCheckRequest, signal?: AbortSignal) =>
+    request<QuickCheckResponse>("/api/quick-check", { ...json(body), signal }),
+  insights: (days: number, signal?: AbortSignal) => request<Insights>(`/api/insights?days=${days}`, { signal }),
+  health: () => request<Health>("/api/health"),
   config: () => request<PublicConfig>("/api/config"),
   policies: () => request<PolicyKB>("/api/policies"),
-  list: () => request<AnalysisSummary[]>("/api/analyses"),
-  get: (id: string) => request<Analysis>(`/api/analyses/${id}`),
-  rerun: (id: string) => request<{ id: string }>(`/api/analyses/${id}/rerun`, { method: "POST" }),
-  remove: (id: string) => request<void>(`/api/analyses/${id}`, { method: "DELETE" }),
+  list: (signal?: AbortSignal) => request<AnalysisSummary[]>("/api/analyses", { signal }),
+  get: (id: string, signal?: AbortSignal) => request<Analysis>(`/api/analyses/${enc(id)}`, { signal }),
+  rerun: (id: string) => request<{ id: string }>(`/api/analyses/${enc(id)}/rerun`, { method: "POST" }),
+  remove: (id: string) => request<void>(`/api/analyses/${enc(id)}`, { method: "DELETE" }),
   videoUrl: (id: string) => `${API_URL}/api/analyses/${id}/video`,
-  frameUrl: (id: string, frameId: string) => `${API_URL}/api/analyses/${id}/frames/${frameId}.jpg`,
+  frameUrl: (id: string, frameId: string) => `${API_URL}/api/analyses/${enc(id)}/frames/${enc(frameId)}.jpg`,
   reportHtmlUrl: (id: string, download = false) =>
     `${API_URL}/api/analyses/${id}/report.html${download ? "?download=true" : ""}`,
   reportJsonUrl: (id: string) => `${API_URL}/api/analyses/${id}/report.json`,
@@ -473,10 +804,13 @@ export const api = {
   authorize: (platform: ConnectedPlatform) =>
     request<{ authorization_url: string }>(`/api/connections/${platform}/authorize`, { method: "POST" }),
   disconnect: (id: string) =>
-    request<{ deleted_analyses: number }>(`/api/connections/${id}`, { method: "DELETE" }),
-  media: (id: string, cursor?: string | null) =>
+    request<{ deleted_analyses: number; revoked: boolean | null; revoke_error: string | null }>(`/api/connections/${enc(id)}`, {
+      method: "DELETE",
+    }),
+  media: (id: string, cursor?: string | null, signal?: AbortSignal) =>
     request<{ items: MediaItem[]; next_cursor: string | null }>(
-      `/api/connections/${id}/media${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/api/connections/${enc(id)}/media${cursor ? `?cursor=${enc(cursor)}` : ""}`,
+      { signal },
     ),
   importAnalysis: (body: {
     connection_id: string;
@@ -485,7 +819,9 @@ export const api = {
     language: Language;
     client_label?: string;
     attach_owner_file?: boolean;
-    sponsorship?: import("@/components/SponsorshipFields").Sponsorship;
+    sponsorship?: Sponsorship;
+    markets?: MarketId[];
+    brief_id?: string;
   }) =>
     request<{ id: string; status: string }>("/api/analyses/import", {
       method: "POST",
@@ -499,42 +835,64 @@ export function attachOwnerFile(
   id: string,
   file: File,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<{ id: string; status: string }> {
   const form = new FormData();
   form.append("file", file);
-  return postAnalysisFile(`/api/analyses/${id}/owner-file`, form, onProgress);
+  return postAnalysisFile(`/api/analyses/${enc(id)}/owner-file`, form, onProgress, signal);
 }
 
 /** Upload with progress reporting (fetch has no upload progress events). */
 export function uploadAnalysis(
   form: FormData,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<{ id: string; status: string }> {
-  return postAnalysisFile("/api/analyses", form, onProgress);
+  return postAnalysisFile("/api/analyses", form, onProgress, signal);
 }
 
 /** Fingerprint a past post into the catalogue; the file is discarded server-side. */
-export function addToCatalogue(form: FormData, onProgress: (fraction: number) => void): Promise<CatalogueAddResult> {
-  return postForm<CatalogueAddResult>("/api/catalogue", form, onProgress);
+export function addToCatalogue(
+  form: FormData,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<CatalogueAddResult> {
+  return postForm<CatalogueAddResult>("/api/catalogue", form, onProgress, signal);
 }
 
 async function postAnalysisFile(
   path: string,
   form: FormData,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<{ id: string; status: string }> {
-  const body = await postForm<{ id?: string; status?: string }>(path, form, onProgress);
+  const body = await postForm<{ id?: string; status?: string }>(path, form, onProgress, signal);
   if (!body?.id) throw new ApiError("Upload failed (unexpected response)", 0);
   return { id: body.id, status: body.status ?? "queued" };
 }
 
-function postForm<T>(path: string, form: FormData, onProgress: (fraction: number) => void): Promise<T> {
+/** Multipart POST with upload progress (fetch has none). Aborting rejects with an AbortError. */
+function postForm<T>(
+  path: string,
+  form: FormData,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<T> {
   return new Promise((resolve, reject) => {
+    const aborted = () => new DOMException("The upload was cancelled.", "AbortError");
+    if (signal?.aborted) {
+      reject(aborted());
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.onabort = () => reject(aborted());
     xhr.open("POST", `${API_URL}${path}`);
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
+      if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
     };
+    // The body is fully sent; the server is now validating it.
+    xhr.upload.onload = () => onProgress(1);
     xhr.onload = () => {
       let body: unknown = null;
       try {
@@ -545,11 +903,10 @@ function postForm<T>(path: string, form: FormData, onProgress: (fraction: number
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(body as T);
       } else {
-        const detail = (body as { detail?: unknown } | null)?.detail;
-        reject(new ApiError(typeof detail === "string" ? detail : `Upload failed (${xhr.status})`, xhr.status));
+        reject(failure(xhr.status, `Upload failed (${xhr.status})`, body, xhr.getResponseHeader("Retry-After")));
       }
     };
-    xhr.onerror = () => reject(new ApiError("Cannot reach the CreatorShield API.", 0));
+    xhr.onerror = () => reject(new ApiError("Cannot reach the CreatorShield API. Check your connection and try again.", 0));
     xhr.send(form);
   });
 }

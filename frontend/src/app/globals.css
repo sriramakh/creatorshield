@@ -1,70 +1,338 @@
 @import "tailwindcss";
 
-@theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-}
+/* Dark mode follows data-theme on <html> (set before first paint by the inline script in
+   app/layout.tsx), so `dark:` utilities key off the attribute, not the media query. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+/* Desktop sidebar collapsed to icons (data-sidebar on <html>, persisted). */
+@custom-variant collapsed (&:where([data-sidebar="collapsed"] *));
+
+/* ---------------------------------------------------------------- tokens (DESIGN.md) */
 
 :root {
   color-scheme: light;
+  --canvas: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #eef0f3;
+  --line: #e3e6eb;
+  --line-strong: #cbd0d8;
+  --ink: #0b1220;
+  --ink-2: #3d4757;
+  --ink-3: #5f6b7e;
+  --accent: #1f4fd8;
+  --accent-hover: #173fb4;
+  --accent-soft: #eaf0ff;
+  --on-accent: #ffffff;
+  --focus: #1f4fd8;
+  --overlay: rgb(11 18 32 / 0.45);
+
+  --critical-fg: #a8071a;
+  --critical-bg: #fdecec;
+  --critical-line: #f5b8b8;
+  --critical-solid: #d92d20;
+  --high-fg: #b54708;
+  --high-bg: #fef0e6;
+  --high-line: #f9c9a4;
+  --high-solid: #ef6820;
+  --medium-fg: #8a5a00;
+  --medium-bg: #fef7dc;
+  --medium-line: #f3d98a;
+  --medium-solid: #eaaa08;
+  --low-fg: #175cd3;
+  --low-bg: #eaf2ff;
+  --low-line: #b9d2fb;
+  --low-solid: #2e90fa;
+  --info-fg: #475467;
+  --info-bg: #f2f4f7;
+  --info-line: #d5d9e0;
+  --info-solid: #667085;
+  --success-fg: #067647;
+  --success-bg: #e7f6ee;
+  --success-line: #abdfc5;
+  --success-solid: #17b26a;
+
+  /* Verdict series for charts (validated with the dataviz palette script against each surface; stacked with 2px gaps). */
+  --chart-ready: #12a36b;
+  --chart-review: #d99a06;
+  --chart-fix: #d92d20;
+
+  --shadow-pop: 0 4px 16px rgb(11 18 32 / 0.08), 0 1px 2px rgb(11 18 32 / 0.06);
+  --shadow-dialog: 0 16px 48px rgb(11 18 32 / 0.18), 0 2px 6px rgb(11 18 32 / 0.08);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-body {
-  background: #f7f8fb;
-  color: #0f172a;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0a0d12;
+  --surface: #11151c;
+  --surface-2: #161b24;
+  --surface-3: #1d2330;
+  --line: #232a36;
+  --line-strong: #343d4d;
+  --ink: #f2f4f8;
+  --ink-2: #c3cad6;
+  --ink-3: #8b95a7;
+  --accent: #6e9bff;
+  --accent-hover: #8db1ff;
+  --accent-soft: #162445;
+  --on-accent: #0a0d12;
+  --focus: #8db1ff;
+  --overlay: rgb(0 0 0 / 0.6);
+
+  --critical-fg: #fda29b;
+  --critical-bg: rgb(240 68 56 / 0.14);
+  --critical-line: rgb(240 68 56 / 0.4);
+  --critical-solid: #f04438;
+  --high-fg: #f9b47c;
+  --high-bg: rgb(239 104 32 / 0.14);
+  --high-line: rgb(239 104 32 / 0.4);
+  --high-solid: #ef6820;
+  --medium-fg: #f5cf5b;
+  --medium-bg: rgb(234 170 8 / 0.14);
+  --medium-line: rgb(234 170 8 / 0.4);
+  --medium-solid: #eaaa08;
+  --low-fg: #84caff;
+  --low-bg: rgb(46 144 250 / 0.14);
+  --low-line: rgb(46 144 250 / 0.4);
+  --low-solid: #2e90fa;
+  --info-fg: #b3bccb;
+  --info-bg: rgb(139 149 167 / 0.14);
+  --info-line: rgb(139 149 167 / 0.4);
+  --info-solid: #8b95a7;
+  --success-fg: #6ce0a3;
+  --success-bg: rgb(23 178 106 / 0.14);
+  --success-line: rgb(23 178 106 / 0.4);
+  --success-solid: #17b26a;
+
+  --chart-ready: #12a36b;
+  --chart-review: #c98d05;
+  --chart-fix: #e5483b;
+
+  --shadow-pop: 0 4px 16px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-dialog: 0 16px 48px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.3);
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-focus: var(--focus);
+  --color-overlay: var(--overlay);
+
+  --color-critical-fg: var(--critical-fg);
+  --color-critical-bg: var(--critical-bg);
+  --color-critical-line: var(--critical-line);
+  --color-critical-solid: var(--critical-solid);
+  --color-high-fg: var(--high-fg);
+  --color-high-bg: var(--high-bg);
+  --color-high-line: var(--high-line);
+  --color-high-solid: var(--high-solid);
+  --color-medium-fg: var(--medium-fg);
+  --color-medium-bg: var(--medium-bg);
+  --color-medium-line: var(--medium-line);
+  --color-medium-solid: var(--medium-solid);
+  --color-low-fg: var(--low-fg);
+  --color-low-bg: var(--low-bg);
+  --color-low-line: var(--low-line);
+  --color-low-solid: var(--low-solid);
+  --color-info-fg: var(--info-fg);
+  --color-info-bg: var(--info-bg);
+  --color-info-line: var(--info-line);
+  --color-info-solid: var(--info-solid);
+  --color-success-fg: var(--success-fg);
+  --color-success-bg: var(--success-bg);
+  --color-success-line: var(--success-line);
+  --color-success-solid: var(--success-solid);
+
+  --color-chart-ready: var(--chart-ready);
+  --color-chart-review: var(--chart-review);
+  --color-chart-fix: var(--chart-fix);
+
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-dialog: 14px;
+  --shadow-pop: var(--shadow-pop);
+  --shadow-dialog: var(--shadow-dialog);
+  --ease-standard: var(--ease);
+
+  /* Type scale: size / line-height / weight (DESIGN.md) */
+  --text-display: 30px;
+  --text-display--line-height: 36px;
+  --text-display--font-weight: 650;
+  --text-h1: 24px;
+  --text-h1--line-height: 32px;
+  --text-h1--font-weight: 650;
+  --text-h2: 18px;
+  --text-h2--line-height: 26px;
+  --text-h2--font-weight: 600;
+  --text-h3: 15px;
+  --text-h3--line-height: 22px;
+  --text-h3--font-weight: 600;
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-small: 13px;
+  --text-small--line-height: 20px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 500;
+  --text-overline: 11px;
+  --text-overline--line-height: 16px;
+  --text-overline--font-weight: 600;
+  --text-overline--letter-spacing: 0.06em;
+}
+
+/* ---------------------------------------------------------------- base */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 22px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--ink-3);
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Subtle scrollbar for scroll panes */
 .scroll-thin {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 @keyframes shimmer {
-  0% { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
 }
 .skeleton {
-  background: linear-gradient(90deg, #eef0f4 0px, #f6f7f9 160px, #eef0f4 320px);
+  background: linear-gradient(90deg, var(--surface-3) 0px, var(--surface-2) 160px, var(--surface-3) 320px);
   background-size: 800px 100%;
   animation: shimmer 1.4s infinite linear;
 }
 
 .highlight-flash {
-  animation: flash 1.6s ease-out;
+  animation: flash 1.6s var(--ease);
 }
 @keyframes flash {
-  0% { box-shadow: 0 0 0 3px rgb(99 102 241 / 0.6); }
-  100% { box-shadow: 0 0 0 3px rgb(99 102 241 / 0); }
+  0% {
+    box-shadow: 0 0 0 3px var(--focus);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
 }
 
-/* ---- landing page ---------------------------------------------------------- */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+.progress-indeterminate {
+  animation: progress-indeterminate 1.2s var(--ease) infinite;
+}
+
+/* Enter/exit for Radix overlays (180 ms) */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@keyframes slide-in-right {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+@keyframes slide-in-up {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+.anim-fade {
+  animation: fade-in 180ms var(--ease);
+}
+.anim-pop {
+  animation: pop-in 180ms var(--ease);
+}
+.anim-drawer {
+  animation: slide-in-right 180ms var(--ease);
+}
+.anim-toast {
+  animation: slide-in-up 180ms var(--ease);
+}
+
+/* ---------------------------------------------------------------- landing */
 html {
   scroll-behavior: smooth;
 }
 
 .landing-grid {
   background-image:
-    linear-gradient(to right, rgb(255 255 255 / 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.06) 1px, transparent 1px);
+    linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line) 1px, transparent 1px);
   background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%);
-}
-
-.landing-rise {
-  animation: landing-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-@keyframes landing-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 20%, #000 30%, transparent 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-  .landing-rise { animation: none; }
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .progress-indeterminate {
+    animation: none;
+    transform: none;
+    width: 100% !important;
+    opacity: 0.5;
+  }
 }
