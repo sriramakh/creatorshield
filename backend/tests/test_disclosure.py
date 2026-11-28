@@ -242,3 +242,92 @@ def test_label_negation_is_local(caption):
 )
 def test_direct_denials_and_uncertainty_still_rejected(caption):
     assert not caption_disclosure(caption)
+
+
+# --- Regressions from the analysis-engine review -------------------------------
+
+
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "My honest non-sponsored review! Use code GLOW20 for 20% off",
+        "non sponsored review",
+        "un-sponsored review",
+        "Unsponsored review",
+        "Is this sponsored? No, I bought it myself. Use code GLOW20",
+        "sponsored? no lol",
+        "Who said #sponsored? lol",
+        "Sponsored - not really",
+        "Not even sponsored lol, code GLOW20",
+        "Not really a paid partnership",
+        "Nobody sponsored this video",
+        "No one has sponsored this",
+        "Nothing here is sponsored",
+        "This wasn't sponsored",
+        "It isn't sponsored",
+        "no sponsorship here",
+        "Partnership with my mom on this recipe",
+        "Collaboration with my friends this weekend",
+    ],
+)
+def test_denials_questions_and_ordinary_prose_are_not_disclosure(caption: str) -> None:
+    assert not caption_disclosure(caption)
+
+
+def test_denied_disclosure_does_not_hide_the_promotion_finding() -> None:
+    findings = run_deterministic_checks(
+        "instagram_reels", "My honest non-sponsored review! Use code GLOW20 for 20% off", [], {}, 30
+    )
+    assert any(
+        f.category == "disclosure" and f.finding_type == "suspected_violation" for f in findings
+    )
+
+
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "#ad Loving this serum",
+        "#AD Glow serum",
+        "Ad: Glow serum",
+        "Sponsored by Glow",
+        "Paid partnership with Glow",
+        "Collaboration with Glow",
+        "#विज्ञापन Glow",
+        "विज्ञापन: Glow",
+        "#ad No added sugar!",
+        "#ad Is this the best serum ever?",
+        "No more excuses! #ad",
+        # Normalisation: full-width, zero-width and emoji-separated labels.
+        "#ａｄ Glow serum",
+        "ad​: Glow serum",
+        "#​ad Glow serum",
+        "Ad 📢 Glow serum",
+        "📢 #ad Glow serum",
+        "Ad 😍",
+    ],
+)
+def test_explicit_labels_still_count(caption: str) -> None:
+    assert caption_disclosure(caption)
+
+
+def test_emoji_after_an_ordinary_word_is_not_a_label() -> None:
+    assert not caption_disclosure("I saw an ad 😂 Use code FIT20")
+
+
+def test_a_denied_sponsor_is_not_disclosed_by_another_sponsors_label() -> None:
+    caption = "Not sponsored by Glow, #ad Luma"
+    assert not caption_disclosure(caption, ["Glow", "Luma"])
+    assert not caption_disclosure(caption, ["Glow"])
+    assert caption_disclosure("#ad Glow and Luma", ["Glow", "Luma"])
+    assert caption_disclosure("Sponsored by Glow, Luma and Nova", ["Glow", "Luma", "Nova"])
+
+
+def test_denial_scan_is_linear_on_label_heavy_text() -> None:
+    import time
+
+    from app.analysis.disclosure import disclosure_sentences
+
+    started = time.perf_counter()
+    for text in ("not " * 5000 + "#ad", "#ad " * 3000, "sponsored " * 2000):
+        disclosure_sentences(text)
+    assert time.perf_counter() - started < 1.0

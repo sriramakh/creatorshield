@@ -8,8 +8,12 @@ import uuid
 from dataclasses import fields
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
+from app import markets as market_registry
+from app.analysis import outcome
+from app.analysis.brief import BriefSpec, run_brief_checks
 from app.analysis.cross_check import build_cross_check
 from app.analysis.deterministic import run_deterministic_checks
 from app.analysis.merge import merge_findings
@@ -29,6 +33,7 @@ from app.media.extract import run_extraction
 from app.media.probe import MediaError, MediaInfo, probe
 from app.media.working_copy import make_working_copy, needs_working_copy
 from app.models import Analysis
+from app.platforms import PLATFORMS
 from app.policies.kb import get_kb
 from app.provenance import pipeline as provenance
 from app.provenance.fingerprint import file_sha256
@@ -50,9 +55,7 @@ STANDARD_LIMITATIONS = [
     "Hindi, music-heavy audio and stylised fonts.",
     "Community-guideline results are risk flags from wording in the transcript, on-screen "
     "text, caption and hashtags. They are not a decision that a policy was broken. The "
-    "rule check does not classify imagery. Local advertising codes, including FTC and UK CAP "
-    "rules, are not in the policy library; the flags use YouTube and Meta policies, which "
-    "apply in India, the US and the UK.",
+    "rule check does not classify imagery.",
     "Policy summaries reflect official pages as verified on the knowledge-base date; "
     "platforms update policies without notice.",
 ]
@@ -79,6 +82,13 @@ MODE_LIMITATIONS = {
 
 FULL_VIDEO_MODES = {"full_video", "cross_checked"}
 
+PLATFORM_UNREACHABLE = (
+    "The platform could not be reached to fetch this post. Try again in a few minutes."
+)
+AI_UNEXPECTED_FAILURE = (
+    "The AI review failed unexpectedly, so only rule-based checks are shown. Try again later."
+)
+
 # YouTube help 15424877: square or vertical uploads up to 3 minutes are Shorts.
 SHORTS_MAX_SECONDS = 180.0
 
@@ -88,6 +98,9 @@ def length_notes(platform: str, duration: float | None) -> list[str]:
     if duration is None or duration <= SHORTS_MAX_SECONDS + 0.5:
         return []
     minutes = f"{duration / 60:.1f} minutes"
+    family = PLATFORMS[platform].family
+    if platform == "youtube_video" or family == "tiktok":
+        return []
     if platform == "youtube_shorts":
         return [
             f"This video is {minutes} long. YouTube treats only square or vertical uploads of "
@@ -100,6 +113,19 @@ def length_notes(platform: str, duration: float | None) -> list[str]:
         "gradually and it differs between accounts; check that the Reels composer accepts "
         "this length before you plan around it."
     ]
+
+
+def market_limitation(markets: list[str]) -> str:
+    """States which advertising guidance was applied, and that others were not."""
+    applied = ", ".join(
+        f"{market_registry.MARKETS[m].regulator} ({market_registry.MARKETS[m].label})"
+        for m in markets
+    )
+    return (
+        f"Advertising guidance applied: {applied}. It is advisory and paraphrased from the "
+        "regulators' published pages; the tool does not decide which country's rules govern "
+        "a post. Advertising codes of other countries were not applied."
+    )
 
 
 def get_provider(settings: Settings) -> AnalysisProvider:
@@ -231,6 +257,10 @@ def _run(
         except (IntegrationError, MediaError) as exc:
             fail(exc.user_message if isinstance(exc, IntegrationError) else str(exc))
             return
+        except (httpx.HTTPError, TimeoutError) as exc:
+            log.warning("platform request failed for %s: %s", analysis.id, type(exc).__name__)
+            fail(PLATFORM_UNREACHABLE)
+            return
         import_notes = list(analysis.limitations or [])
     elif analysis.source != "upload":
         _set_stage(db, analysis, "fetching_source", 6)
@@ -238,6 +268,10 @@ def _run(
             prebuilt = prepare_import(db, analysis, settings)
         except (IntegrationError, MediaError) as exc:
             fail(exc.user_message if isinstance(exc, IntegrationError) else str(exc))
+            return
+        except (httpx.HTTPError, TimeoutError) as exc:
+            log.warning("platform request failed for %s: %s", analysis.id, type(exc).__name__)
+            fail(PLATFORM_UNREACHABLE)
             return
         import_notes = list(analysis.limitations or [])
 
@@ -266,9 +300,10 @@ def _run(
             return
     else:
         extraction = prebuilt or {"transcript": {"segments": []}, "frames": [], "ocr": []}
+    markets = outcome.markets_of(analysis)
     cross_findings: list[FindingDraft] = []
     if snapshot is not None:
-        report, cross_findings = build_cross_check(analysis.platform, snapshot, extraction)
+        report, cross_findings = build_cross_check(analysis.platform, snapshot, extraction, markets)
         extraction["cross_check"] = report
         if snapshot.get("source_metadata"):
             extraction["source_metadata"] = snapshot["source_metadata"]
@@ -298,6 +333,7 @@ def _run(
         duration or 0.0,
         analysis_mode=analysis.analysis_mode,
         sponsorship=analysis.sponsorship,
+        markets=markets,
     )
     drafts.extend(cross_findings)
 
@@ -307,6 +343,7 @@ def _run(
     analysis.policy_kb_version = kb.version
     notes: list[str] = []
     result: ProviderResult | None = None
+    ai_findings: list[FindingDraft] = []
     try:
         provider = provider or get_provider(settings)
         analysis.ai_provider, analysis.ai_model = provider.name, provider.model
@@ -321,8 +358,18 @@ def _run(
             kb=kb,
             analysis_mode=analysis.analysis_mode,
             sponsorship=analysis.sponsorship,
+            markets=markets,
         )
         result = provider.analyze(payload)
+        ai_findings, notes = validate_ai_output(
+            result.output,
+            kb=kb,
+            platform=analysis.platform,
+            extraction=extraction,
+            duration=duration,
+            is_mock=result.is_mock,
+            markets=markets,
+        )
         analysis.ai_status = "mock" if result.is_mock else "completed"
         analysis.ai_status_detail = None
         analysis.mock_mode = result.is_mock
@@ -332,18 +379,18 @@ def _run(
     except MissingCredentialsError as exc:
         analysis.ai_status, analysis.ai_status_detail = "skipped", exc.user_message
         analysis.ai_provider = settings.ai_provider
+        result = None
     except ProviderError as exc:
         analysis.ai_status, analysis.ai_status_detail = "failed", exc.user_message
+        result = None
+    except Exception:
+        # Any other failure in the AI step (SDK, prompt building, validation) must
+        # not cost the creator the rule-based results: record it and carry on.
+        log.exception("AI review failed unexpectedly for analysis %s", analysis.id)
+        analysis.ai_status, analysis.ai_status_detail = "failed", AI_UNEXPECTED_FAILURE
+        result, ai_findings, notes = None, [], []
 
     if result is not None:
-        ai_findings, notes = validate_ai_output(
-            result.output,
-            kb=kb,
-            platform=analysis.platform,
-            extraction=extraction,
-            duration=duration,
-            is_mock=result.is_mock,
-        )
         drafts = merge_findings(drafts, ai_findings)
         analysis.summary = result.output.summary
         analysis.context_assessment = result.output.context_assessment
@@ -353,6 +400,24 @@ def _run(
             "AI review did not run, so only rule-based checks are shown. "
             + (analysis.ai_status_detail or "")
         ).strip()
+
+    # ---- brand brief: contract checks, added after the AI merge so they stay
+    # separate from policy findings ------------------------------------------
+    analysis.brief_check = None
+    if analysis.brief:
+        try:
+            brief = BriefSpec.model_validate(analysis.brief)
+        except ValueError:
+            log.warning("stored brief for %s is invalid; skipped", analysis.id)
+        else:
+            analysis.brief_check, brief_findings = run_brief_checks(
+                brief,
+                analysis.caption,
+                analysis.hashtags,
+                extraction,
+                analysis_mode=analysis.analysis_mode,
+            )
+            drafts.extend(brief_findings)
 
     # ---- persist -------------------------------------------------------------
     _set_stage(db, analysis, "finalizing", 95)
@@ -365,6 +430,7 @@ def _run(
     limitations = list(MODE_LIMITATIONS.get(analysis.analysis_mode, []))
     limitations.extend(length_notes(analysis.platform, analysis.duration_seconds))
     limitations.extend(STANDARD_LIMITATIONS)
+    limitations.append(market_limitation(markets))
     limitations.extend(import_notes)
     limitations.extend(extraction.get("warnings", []))
     limitations.extend((analysis.provenance or {}).get("warnings", []))

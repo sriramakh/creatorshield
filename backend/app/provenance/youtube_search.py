@@ -12,10 +12,11 @@ import logging
 import re
 import tempfile
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from sqlalchemy import select
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.integrations.common import IntegrationError, _redis, get_http_client
 from app.integrations.connections import access_token
+from app.media.probe import MediaError
 from app.models import PlatformConnection
 from app.provenance.common import LookupFailed
 from app.provenance.fingerprint import nearest_frame, thumbnail_hash
@@ -31,6 +33,7 @@ from app.provenance.fingerprint import nearest_frame, thumbnail_hash
 log = logging.getLogger(__name__)
 
 SEARCH_COST_UNITS = 100
+THUMB_MAX_BYTES = 2_000_000
 STRONG_VISUAL = 0.12
 POSSIBLE_VISUAL = 0.2
 _STOP = {
@@ -58,8 +61,18 @@ def suggest_query(caption: str, title: str | None, transcript: list[dict[str, An
     return " ".join(head_words + extra)[:120].strip()
 
 
-def _quota_key() -> str:
-    return f"creatorshield:yt-search-units:{datetime.now(UTC).date().isoformat()}"
+def _quota_day(now: datetime | None = None) -> str:
+    """YouTube Data API quotas reset at midnight Pacific Time, so count per Pacific day."""
+    now = now or datetime.now(UTC)
+    try:
+        pacific: tzinfo = ZoneInfo("America/Los_Angeles")
+    except ZoneInfoNotFoundError:  # no tz database: PST, at worst an hour early in summer
+        pacific = timezone(timedelta(hours=-8))
+    return now.astimezone(pacific).date().isoformat()
+
+
+def _quota_key(now: datetime | None = None) -> str:
+    return f"creatorshield:yt-search-units:{_quota_day(now)}"
 
 
 def quota_used() -> int:
@@ -71,36 +84,52 @@ def quota_used() -> int:
 
 
 def _spend_quota(settings: Settings) -> None:
-    redis = _redis()
-    key = _quota_key()
-    used = int(redis.get(key) or 0)
-    if used + SEARCH_COST_UNITS > settings.youtube_search_daily_unit_cap:
-        raise LookupFailed(
-            f"Today's YouTube search allowance is used up ({used} of "
-            f"{settings.youtube_search_daily_unit_cap} quota units). It resets at midnight "
-            "Pacific Time."
-        )
-    redis.incrby(key, SEARCH_COST_UNITS)
-    redis.expire(key, 60 * 60 * 36)
+    """Atomically take SEARCH_COST_UNITS from today's allowance (or refuse)."""
+    try:
+        redis = _redis()
+        key = _quota_key()
+        used = int(redis.incrby(key, SEARCH_COST_UNITS))
+        redis.expire(key, 60 * 60 * 36)
+        if used > settings.youtube_search_daily_unit_cap:
+            redis.decrby(key, SEARCH_COST_UNITS)
+            raise LookupFailed(
+                f"Today's YouTube search allowance is used up ({used - SEARCH_COST_UNITS} of "
+                f"{settings.youtube_search_daily_unit_cap} quota units). It resets at midnight "
+                "Pacific Time."
+            )
+    except LookupFailed:
+        raise
+    except Exception as exc:  # Redis unavailable: do not search without a quota counter
+        raise LookupFailed("YouTube search is unavailable (quota counter unreachable).") from exc
 
 
-def _auth(db: Session, settings: Settings) -> tuple[dict[str, str], dict[str, str], set[str]]:
-    """(query params, headers, own channel ids). API key preferred; else a channel token."""
-    own = {c.external_id for c in db.scalars(select(PlatformConnection)).all()}
+def _auth(
+    db: Session, settings: Settings, own_channel_ids: set[str]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """(query params, headers). API key preferred; else the token of one of this
+    client's own connected channels (never another client's)."""
     if settings.youtube_search_api_key and settings.youtube_search_api_key.get_secret_value():
-        return {"key": settings.youtube_search_api_key.get_secret_value()}, {}, own
-    conn = db.scalars(
-        select(PlatformConnection).where(PlatformConnection.platform == "youtube")
-    ).first()
+        return {"key": settings.youtube_search_api_key.get_secret_value()}, {}
+    conn = (
+        db.scalars(
+            select(PlatformConnection).where(
+                PlatformConnection.platform == "youtube",
+                PlatformConnection.external_id.in_(sorted(own_channel_ids)),
+            )
+        ).first()
+        if own_channel_ids
+        else None
+    )
     if conn is None:
         raise LookupFailed(
-            "YouTube search needs YOUTUBE_SEARCH_API_KEY or a connected YouTube channel."
+            "YouTube search needs YOUTUBE_SEARCH_API_KEY or a connected YouTube channel "
+            "belonging to this client."
         )
     try:
         token = access_token(db, conn, settings)
     except IntegrationError as exc:
         raise LookupFailed(exc.user_message) from exc
-    return {}, {"Authorization": f"Bearer {token}"}, own
+    return {}, {"Authorization": f"Bearer {token}"}
 
 
 def _thumb_allowed(url: str, hosts: list[str]) -> bool:
@@ -115,11 +144,16 @@ def search(
     frame_hashes: list[str | None],
     frame_step: float,
     settings: Settings,
+    own_channels: set[str] | None = None,
 ) -> dict[str, Any]:
+    """``own_channels``: YouTube channel ids that belong to the analysed post's client
+    (see ``ledger.connected_accounts_for``). Other connected channels are results
+    like any other."""
+    own_channels = set(own_channels or set())
     query = re.sub(r"\s+", " ", query).strip()[:120]
     if len(query) < 3:
         raise LookupFailed("Enter a few words to search for.")
-    params, headers, own_channels = _auth(db, settings)
+    params, headers = _auth(db, settings, own_channels)
     _spend_quota(settings)
     with get_http_client() as http:
         try:
@@ -142,7 +176,12 @@ def search(
             raise LookupFailed("YouTube refused the search (quota or API key restrictions).")
         if response.status_code >= 400:
             raise LookupFailed(f"YouTube search returned HTTP {response.status_code}.")
-        items = response.json().get("items") or []
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise LookupFailed("YouTube search returned an unreadable answer.") from exc
+        raw_items = payload.get("items") if isinstance(payload, dict) else None
+        items = [i for i in raw_items or [] if isinstance(i, dict)]
         results = []
         with tempfile.TemporaryDirectory(prefix="cs-thumb-") as tmp:
             for item in items:
@@ -197,16 +236,25 @@ def _compare_thumbnail(
     none = {"visual_distance": None, "visual_match": "unknown", "matched_at": None}
     if not url or not _thumb_allowed(url, settings.youtube_thumbnail_hosts):
         return none
+    path = tmp / "thumb.img"
+    data = bytearray()
     try:
-        resp = http.get(url)
+        with http.stream("GET", url) as resp:
+            if resp.status_code != 200:
+                return none
+            for chunk in resp.iter_bytes(64 * 1024):
+                data += chunk
+                if len(data) > THUMB_MAX_BYTES:
+                    return none
     except httpx.HTTPError:
         return none
-    if resp.status_code != 200 or len(resp.content) > 2_000_000:
-        return none
-    path = tmp / "thumb.jpg"
-    path.write_bytes(resp.content)
-    h = thumbnail_hash(path)
-    path.unlink(missing_ok=True)
+    path.write_bytes(bytes(data))
+    try:
+        h = thumbnail_hash(path)
+    except MediaError:
+        h = None
+    finally:
+        path.unlink(missing_ok=True)
     if h is None:
         return none
     nearest = nearest_frame(h, frame_hashes, frame_step)

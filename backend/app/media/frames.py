@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.media.probe import MediaError, media_timeout
+from app.media.probe import MediaError, input_args, media_timeout
 
 _PTS_RE = re.compile(r"pts_time:([0-9.]+)")
 
@@ -27,8 +27,7 @@ def detect_scene_changes(video: Path, threshold: float, timeout: float = 120.0) 
             "ffmpeg",
             "-hide_banner",
             "-nostdin",
-            "-i",
-            str(video),
+            *input_args(video),
             "-vf",
             f"select='gt(scene,{threshold})',showinfo",
             "-an",
@@ -38,6 +37,8 @@ def detect_scene_changes(video: Path, threshold: float, timeout: float = 120.0) 
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -97,8 +98,7 @@ def extract_frame(video: Path, timestamp: float, out: Path, width: int) -> None:
             "-y",
             "-ss",
             f"{timestamp:.3f}",
-            "-i",
-            str(video),
+            *input_args(video),
             "-frames:v",
             "1",
             "-vf",
@@ -109,6 +109,8 @@ def extract_frame(video: Path, timestamp: float, out: Path, width: int) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
         check=False,
     )

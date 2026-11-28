@@ -30,6 +30,12 @@ os.environ.update(
         "ANTHROPIC_API_KEY": "",
         "OPENAI_API_KEY": "",
         "LOG_LEVEL": "WARNING",
+        # Tests call app.jobs.run_maintenance directly; no background loop.
+        "MAINTENANCE_INTERVAL_SECONDS": "0",
+        "REQUIRE_LOGIN": "false",
+        "PILOT_USERNAME": "",
+        "PILOT_PASSWORD_HASH": "",
+        "AGENCY_ID": "",
         # Connected accounts: test credentials; HTTP goes to tests/fake_platforms.py
         "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "INSTAGRAM_APP_ID": "test-ig-app",

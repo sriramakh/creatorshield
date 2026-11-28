@@ -116,7 +116,8 @@ def test_token_encryption_roundtrip() -> None:
 @pytest.fixture
 def fake(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     fake_platforms.STATE.update({"revoked": [], "token_requests": []})
-    fake_platforms.STATE.pop("last_scope", None)
+    for knob in ("last_scope", "rotate_refresh", "revoke_fails"):
+        fake_platforms.STATE.pop(knob, None)
 
     def factory() -> TestClient:
         return TestClient(fake_platforms.app, follow_redirects=False)

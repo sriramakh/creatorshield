@@ -9,9 +9,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.analysis.prompt import ImagePart, PromptPayload
 from app.analysis.providers.base import MissingCredentialsError, ProviderError, ProviderResult
 from app.schemas import AIAnalysisOutput
+
+# Frames are sent at "high" detail so on-screen handles, watermarks and logos
+# stay legible ("low" downsamples every image to 512 px). Cost note: frames are
+# at most 768 px wide (config.frame_width), i.e. about 6 tiles = ~1.1k input
+# tokens per vertical frame; 64 frames (the max) is roughly 70k tokens. Frames
+# beyond HIGH_DETAIL_MAX_FRAMES fall back to "low" (85 tokens each).
+HIGH_DETAIL_MAX_FRAMES = 64
+# Reasoning tokens count toward max_completion_tokens; keep room for the answer.
+OUTPUT_TOKEN_FLOOR = 32000
+# Non-streaming request: allow long reviews to finish before the client gives up.
+MIN_TIMEOUT_SECONDS = 600.0
+MAX_RETRIES = 2
 
 
 class OpenAIProvider:
@@ -28,20 +42,24 @@ class OpenAIProvider:
 
         self._openai = openai
         self.model = model
-        self.max_tokens = max_tokens
-        self.client = openai.OpenAI(api_key=api_key, timeout=timeout, max_retries=2)
+        self.max_tokens = max(max_tokens, OUTPUT_TOKEN_FLOOR)
+        self.client = openai.OpenAI(
+            api_key=api_key, timeout=max(timeout, MIN_TIMEOUT_SECONDS), max_retries=MAX_RETRIES
+        )
 
     @staticmethod
     def _content(payload: PromptPayload) -> list[Any]:
         content: list[Any] = []
+        images = 0
         for part in payload.parts:
             if isinstance(part, ImagePart):
+                images += 1
                 content.append(
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:{part.media_type};base64,{part.data_b64}",
-                            "detail": "low",
+                            "detail": "high" if images <= HIGH_DETAIL_MAX_FRAMES else "low",
                         },
                     }
                 )
@@ -79,6 +97,12 @@ class OpenAIProvider:
             raise ProviderError("Could not reach the OpenAI API.", retryable=True) from exc
         except openai.LengthFinishReasonError as exc:
             raise ProviderError("The model response was truncated (max tokens).") from exc
+        except openai.ContentFilterFinishReasonError as exc:
+            raise ProviderError("The model declined to analyse this content.") from exc
+        except ValidationError as exc:
+            raise ProviderError("The model response did not match the expected schema.") from exc
+        except openai.OpenAIError as exc:
+            raise ProviderError("The OpenAI API returned an unexpected response.") from exc
 
         message = completion.choices[0].message
         if getattr(message, "refusal", None):

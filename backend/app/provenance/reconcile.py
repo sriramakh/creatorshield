@@ -70,13 +70,31 @@ def _terms_and_refs(
     return {t for t in terms if len(t) >= 4}, refs
 
 
+def _shares_ref(f: FindingDraft, refs: set[str]) -> bool:
+    return bool(refs & {str(e.get("ref_id")) for e in f.evidence})
+
+
+def _names_subject(f: FindingDraft, terms: set[str]) -> bool:
+    text = " ".join([f.title, f.explanation, *(str(e.get("detail") or "") for e in f.evidence)])
+    return any(term_matches(t, text) for t in terms)
+
+
 def _hit(f: FindingDraft, area: str, terms: set[str], refs: set[str]) -> bool:
     if f.category not in AREA_CATEGORIES.get(area, set()):
         return False
-    if refs & {str(e.get("ref_id")) for e in f.evidence}:
+    return _shares_ref(f, refs) or _names_subject(f, terms)
+
+
+def _same_issue(f: FindingDraft, target: FindingDraft, terms: set[str], refs: set[str]) -> bool:
+    """Strong enough to stop counting one of the two findings.
+
+    Naming the same subject is enough. A shared frame alone is not: one frame can
+    show a handle and, separately, a film clip or a song. It counts only when both
+    findings are also about the same kind of problem.
+    """
+    if _names_subject(f, terms):
         return True
-    text = " ".join([f.title, f.explanation, *(str(e.get("detail") or "") for e in f.evidence)])
-    return any(term_matches(t, text) for t in terms)
+    return _shares_ref(f, refs) and f.category == target.category
 
 
 def _record_text(line: dict[str, Any]) -> str:
@@ -136,7 +154,7 @@ def reconcile(
                 "Confirm that it covers every concern and intended use; this finding still counts."
             )
             continue
-        for line, _, _ in open_lines:
+        for line, terms, refs in open_lines:
             target = next(
                 (
                     p
@@ -147,6 +165,8 @@ def reconcile(
                 None,
             )
             if target is None or target.rights_status is not None:
+                continue
+            if not _same_issue(f, target, terms, refs):
                 continue
             if SEVERITY_ORDER[f.severity] < SEVERITY_ORDER[target.severity]:
                 # The other review rated it more severe: count that one instead.

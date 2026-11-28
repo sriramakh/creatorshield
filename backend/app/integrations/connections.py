@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -62,6 +63,8 @@ def _upsert(db: Session, platform: str, external_id: str, **fields: Any) -> Plat
         conn = PlatformConnection(platform=platform, external_id=external_id)
         db.add(conn)
     for k, v in fields.items():
+        if k == "refresh_token_enc" and v is None and conn.refresh_token_enc:
+            continue  # Google omits the refresh token on some re-consents: keep the old one
         setattr(conn, k, v)
     conn.token_issued_at = _now()
     db.commit()
@@ -116,59 +119,109 @@ def complete_authorization(
     raise IntegrationError("Unknown platform.", 404)
 
 
-def access_token(db: Session, conn: PlatformConnection, settings: Settings) -> str:
-    """Return a valid access token, refreshing it when needed."""
-    token = decrypt_token(conn.access_token_enc)
-    now = _now()
+def _needs_refresh(conn: PlatformConnection, now: datetime) -> bool:
     expires = conn.token_expires_at
     if conn.platform == "youtube":
-        if expires is None or expires - now > timedelta(seconds=90):
-            return token
-        if not conn.refresh_token_enc:
-            raise IntegrationError("YouTube session expired. Reconnect the channel.", 401)
-        with get_http_client() as http:
-            ref = yt.YouTubeClient(http, settings).refresh(decrypt_token(conn.refresh_token_enc))
-        conn.access_token_enc = encrypt_token(ref.access_token)
-        conn.token_expires_at = ref.expires_at
-        db.commit()
-        return ref.access_token
+        return expires is not None and expires - now <= timedelta(seconds=90)
     # Instagram long-lived tokens: refresh when < 7 days remain (must be > 24h old).
-    if expires is not None and expires <= now:
-        raise IntegrationError("Instagram session expired. Reconnect the account.", 401)
-    if (
+    return (
         expires is not None
+        and expires > now
         and expires - now < timedelta(days=7)
         and now - conn.token_issued_at > timedelta(hours=24)
-    ):
+    )
+
+
+def access_token(db: Session, conn: PlatformConnection, settings: Settings) -> str:
+    """Return a valid access token, refreshing it when needed.
+
+    The refresh runs with the connection row locked (SELECT ... FOR UPDATE), so two
+    workers do not refresh at once and the second one reuses the first one's token.
+    A refresh token rotated by Google replaces the stored one.
+    """
+    now = _now()
+    expires = conn.token_expires_at
+    if conn.platform == "instagram" and expires is not None and expires <= now:
+        raise IntegrationError("Instagram session expired. Reconnect the account.", 401)
+    if not _needs_refresh(conn, now):
+        return decrypt_token(conn.access_token_enc)
+    db.refresh(conn, with_for_update=True)  # re-read under lock: another worker may be done
+    if not _needs_refresh(conn, now):
+        token = decrypt_token(conn.access_token_enc)
+        db.commit()
+        return token
+    try:
+        if conn.platform == "youtube":
+            if not conn.refresh_token_enc:
+                raise IntegrationError("YouTube session expired. Reconnect the channel.", 401)
+            current_refresh = decrypt_token(conn.refresh_token_enc)
+            with get_http_client() as http:
+                ref = yt.YouTubeClient(http, settings).refresh(current_refresh)
+            conn.access_token_enc = encrypt_token(ref.access_token)
+            conn.token_expires_at = ref.expires_at
+            if ref.refresh_token and ref.refresh_token != current_refresh:
+                conn.refresh_token_enc = encrypt_token(ref.refresh_token)
+            db.commit()
+            return ref.access_token
         with get_http_client() as http:
-            ref_ig = ig.InstagramClient(http, settings).refresh(token)
+            ref_ig = ig.InstagramClient(http, settings).refresh(
+                decrypt_token(conn.access_token_enc)
+            )
         conn.access_token_enc = encrypt_token(ref_ig.access_token)
         conn.token_expires_at = ref_ig.expires_at
         conn.token_issued_at = now
         db.commit()
         return ref_ig.access_token
-    return token
+    except BaseException:
+        db.rollback()  # release the row lock
+        raise
 
 
-def disconnect(db: Session, conn: PlatformConnection, settings: Settings) -> int:
+@dataclass
+class DisconnectResult:
+    deleted_analyses: int
+    # True: the platform confirmed revocation. False: it failed (the user should
+    # remove the app in their Google account settings). None: the platform has no
+    # revocation endpoint for this connection type (Instagram).
+    revoked: bool | None
+    revoke_error: str | None = None
+
+
+def disconnect_account(
+    db: Session, conn: PlatformConnection, settings: Settings
+) -> DisconnectResult:
     """Revoke access where the platform supports it, then delete the connection and
     every analysis imported through it (YouTube policy requires deleting authorized
-    data after revocation). Returns the number of analyses deleted."""
+    data after revocation). Local deletion happens even when revocation fails; the
+    failure is reported, not hidden."""
     from app.jobs import delete_analysis
 
+    revoked: bool | None = None
+    revoke_error: str | None = None
     if conn.platform == "youtube":
         try:
             token = decrypt_token(conn.refresh_token_enc or conn.access_token_enc)
             with get_http_client() as http:
                 yt.YouTubeClient(http, settings).revoke(token)
-        except Exception:  # revocation is best effort; local deletion must still happen
-            log.warning("YouTube token revocation failed for connection %s", conn.id)
+            revoked = True
+        except IntegrationError as exc:
+            revoked, revoke_error = False, exc.user_message
+        except Exception:
+            revoked, revoke_error = False, "Google could not be reached to revoke access."
+        if not revoked:
+            log.error("YouTube token revocation failed for connection %s", conn.id)
     imported = db.scalars(select(Analysis).where(Analysis.connection_id == conn.id)).all()
     for a in imported:
         delete_analysis(db, a)
     db.delete(conn)
     db.commit()
-    return len(imported)
+    return DisconnectResult(len(imported), revoked, revoke_error)
+
+
+def disconnect(db: Session, conn: PlatformConnection, settings: Settings) -> int:
+    """Backward-compatible wrapper: number of analyses deleted. Prefer
+    :func:`disconnect_account`, which also reports whether revocation succeeded."""
+    return disconnect_account(db, conn, settings).deleted_analyses
 
 
 # ---------------------------------------------------------------- media

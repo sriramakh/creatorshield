@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.media.audio import wav_duration
-from app.media.probe import MediaError, media_timeout
+from app.media.probe import AUDIO_DEMUXERS, MediaError, input_args, media_timeout
 
 log = logging.getLogger(__name__)
 
@@ -129,8 +129,7 @@ class OpenAITranscriber:
                 "-loglevel",
                 "error",
                 "-y",
-                "-i",
-                str(audio),
+                *input_args(audio, AUDIO_DEMUXERS),
                 "-ac",
                 "1",
                 "-b:a",
@@ -139,6 +138,8 @@ class OpenAITranscriber:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=media_timeout(wav_duration(audio)),
             check=False,
         )

@@ -12,31 +12,100 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app import markets as market_registry
+from app.analysis import market_disclosure
 from app.analysis.community_guidelines import is_finance_claim, run_community_guideline_checks
 from app.analysis.disclosure import caption_disclosure, disclosure_sentences
+from app.analysis.textnorm import normalise
+from app.platforms import PLATFORMS
 from app.schemas import FindingDraft
 
-PLATFORM_RULES: dict[str, dict[str, list[str]]] = {
-    "youtube_shorts": {
-        "disclosure": ["YT-DISC-PAID-PROMO", "IN-ASCI-INFLUENCER"],
+TIKTOK_RULES: dict[str, list[str]] = {
+    "disclosure": [],
+    "copyright": [],
+    "hashtags": [],
+    "health_claims": [],
+    "reused": [],
+    "overview": [],
+}
+US_RULES: dict[str, list[str]] = {
+    "disclosure": ["US-FTC-DISCLOSURES-101", "US-FTC-FAQ-HOW", "US-FTC-GUIDES-255"],
+    "health_claims": ["US-FTC-HEALTH-CLAIMS", "US-FTC-GUIDES-255-TYPICALITY"],
+}
+UK_RULES: dict[str, list[str]] = {
+    "disclosure": ["UK-ASA-INFLUENCER-GUIDE", "UK-CMA-HIDDEN-ADS", "UK-CAP-CODE-S2"],
+    "health_claims": [],
+}
+
+# Rule IDs each check cites, by platform family. Every ID must exist in the policy
+# knowledge base for that family (enforced by tests).
+FAMILY_RULES: dict[str, dict[str, list[str]]] = {
+    "youtube": {
+        "disclosure": ["YT-DISC-PAID-PROMO"],
         "copyright": ["YT-COPY-BASICS"],
         "hashtags": ["YT-HASHTAGS"],
-        "health_claims": ["YT-MON-AD-FRIENDLY", "YT-CG-MEDMISINFO", "IN-ASCI-INFLUENCER"],
+        "health_claims": ["YT-MON-AD-FRIENDLY", "YT-CG-MEDMISINFO"],
         "reused": ["YT-MON-YPP"],
+        "overview": ["YT-CG-OVERVIEW"],
     },
-    "instagram_reels": {
-        "disclosure": ["IG-PAID-PARTNERSHIP", "IG-BRANDED-DISCLOSURE", "IN-ASCI-INFLUENCER"],
+    "instagram": {
+        "disclosure": ["IG-PAID-PARTNERSHIP", "IG-BRANDED-DISCLOSURE"],
         "copyright": ["IG-COPYRIGHT"],
         "hashtags": [],
-        "health_claims": ["IG-MON-CONTENT", "IG-RECOMMENDATIONS", "IN-ASCI-INFLUENCER"],
+        "health_claims": ["IG-MON-CONTENT", "IG-RECOMMENDATIONS"],
         "reused": ["IG-MON-CONTENT", "IG-RECOMMENDATIONS"],
+        "overview": ["META-CS-OVERVIEW"],
     },
+    "tiktok": TIKTOK_RULES,
 }
+
+# Rule IDs each audience market adds to the disclosure and claims checks.
+MARKET_RULES: dict[str, dict[str, list[str]]] = {
+    "IN": {
+        "disclosure": ["IN-ASCI-INFLUENCER", "IN-CCPA-ENDORSE"],
+        "health_claims": ["IN-ASCI-INFLUENCER"],
+    },
+    "US": US_RULES,
+    "UK": UK_RULES,
+}
+
+# What each regulator expects of a disclosure, in one sentence, for suggested actions.
+MARKET_ADVICE: dict[str, str] = {
+    "IN": (
+        "ASCI (India) expects a permitted label such as Advertisement, Ad, Sponsored, "
+        "Collaboration or Partnership up front, where it cannot be missed."
+    ),
+    "US": (
+        "The FTC (US) expects a simple, clear disclosure such as 'Ad' or 'Sponsored' placed "
+        "with the endorsement itself, in the video as well as the caption, and not buried "
+        "among hashtags."
+    ),
+    "UK": (
+        "The ASA and CMA (UK) expect an upfront label that says it is advertising, such as "
+        "'Ad' or 'Advert', and advise against 'sponsored', 'gifted', 'collab' and 'affiliate' "
+        "on their own."
+    ),
+}
+
+
+def rules_for(platform: str, markets: list[str]) -> dict[str, list[str]]:
+    """Rule IDs per check for a target platform and its audience markets."""
+    rules = {k: list(v) for k, v in FAMILY_RULES[PLATFORMS[platform].family].items()}
+    for market in markets:
+        for key, ids in MARKET_RULES.get(market, {}).items():
+            rules[key] = [*rules.get(key, []), *[i for i in ids if i not in rules.get(key, [])]]
+    return rules
+
 
 # Promotion signals (English, Hindi, and common Hinglish transliterations).
 _PROMO_PATTERNS = [
-    r"\b(?:use|apply)\s+(?:my\s+)?(?:promo\s+|discount\s+|coupon\s+)?code\b",
-    r"\bcode\s+[A-Z0-9]{3,}\b",
+    r"\b(?:use|apply)\s+(?:my\s+)?(?:promo\s+|discount\s+|coupon\s+)?code\b"
+    r"(?!\s+(?:to|for|in|from|that|which|snippets?|blocks?|examples?|editors?)\b)",
+    # "code GLOW20" / "code SAVE": the token must look like a code (contains a
+    # digit, or is written in capitals), so "the code for this function" or
+    # "error code" lines are not promotions. The token part is case-sensitive.
+    r"(?<!error )(?<!status )(?<!zip )(?<!pin )(?<!area )(?<!source )\bcode\s+"
+    r"(?-i:(?=[A-Za-z0-9]{3,}\b)(?:[A-Za-z]*\d[A-Za-z0-9]*|[A-Z]{3,}[A-Z0-9]*))\b",
     r"\b(?:promo|discount|coupon)\s+code\b",
     r"\b\d{1,3}\s?%\s?off\b",
     r"\blink\s+(?:is\s+)?in\s+(?:my\s+)?bio\b",
@@ -50,9 +119,23 @@ _PROMO_PATTERNS = [
     r"(?:छूट|डिस्काउंट)",
     r"लिंक\s+बायो",
 ]
+# Food sense of "cured" (cured ham, salt-cured salmon) is not a health claim.
+_CURE = (
+    r"(?<!salt-)(?<!salt )\bcure[sd]?\b(?!\s+(?:ham|meats?|salmon|bacon|pork|sausages?|"
+    r"salami|beef|fish|duck|eggs?|yolks?|lemons?|olives?|tobacco|concrete|resin)\b)"
+)
+# A guarantee is a claim when it is about results, health or the body.
+# "I guarantee you will laugh" is not.
+_GUARANTEE = (
+    r"\bguarantee[sd]?\b(?=.{0,50}?\b(?:results?|cure[sd]?|heal(?:s|ed|ing)?|lose|loss|"
+    r"weight|fat|kgs?|pounds|lbs|skin|hair|acne|pimples?|glow|fair(?:er|ness)?|whiten\w*|"
+    r"growth|grow|effective|relief|pain|diabetes|cancer|sugar|bp|immunity|inches|"
+    r"muscles?|abs|height|works?|fix(?:es|ed)?)\b)"
+    r"|\bguaranteed\s+(?:results?|cure|weight\s+loss|fat\s+loss|relief|growth)\b"
+)
 _HEALTH_CLAIM_PATTERNS = [
-    r"\bcure[sd]?\b",
-    r"\bguarantee[sd]?\b",
+    _CURE,
+    _GUARANTEE,
     r"\b100\s?%\s+(?:results|effective|guaranteed)\b",
     r"\bdoctors\s+(?:hate|don'?t\s+want)\b",
     r"\bmiracle\b",
@@ -87,20 +170,30 @@ class TextItem:
     end: float | None
 
 
+def thumbnail_frame_ids(extraction: dict[str, Any]) -> set[str]:
+    """Frames that are a post's cover image, not a moment in the video."""
+    return {f["id"] for f in extraction.get("frames") or [] if f.get("reason") == "thumbnail"}
+
+
 def collect_text_items(
     caption: str, hashtags: list[str], extraction: dict[str, Any]
 ) -> list[TextItem]:
+    """Text to check, normalised (NFKC, invisible characters, ASCII quotes)."""
     items: list[TextItem] = []
     if caption.strip():
-        items.append(TextItem("caption", "CAPTION", caption, None, None))
+        items.append(TextItem("caption", "CAPTION", normalise(caption), None, None))
     if hashtags:
-        items.append(
-            TextItem("hashtags", "HASHTAGS", " ".join(f"#{h}" for h in hashtags), None, None)
-        )
+        tags = normalise(" ".join(f"#{h}" for h in hashtags))
+        items.append(TextItem("hashtags", "HASHTAGS", tags, None, None))
     for seg in (extraction.get("transcript") or {}).get("segments", []):
-        items.append(TextItem("transcript", seg["id"], seg["text"], seg["start"], seg["end"]))
+        items.append(
+            TextItem("transcript", seg["id"], normalise(seg["text"]), seg["start"], seg["end"])
+        )
+    thumbnails = thumbnail_frame_ids(extraction)
     for o in extraction.get("ocr") or []:
-        items.append(TextItem("ocr", o["id"], o["text"], o["timestamp"], o["timestamp"]))
+        # Text on a cover thumbnail has no position in the video.
+        ts = None if o.get("frame_id") in thumbnails else o.get("timestamp")
+        items.append(TextItem("ocr", o["id"], normalise(o["text"]), ts, ts))
     return items
 
 
@@ -144,8 +237,11 @@ def run_deterministic_checks(
     duration: float,
     analysis_mode: str = "full_video",
     sponsorship: dict[str, Any] | None = None,
+    markets: list[str] | None = None,
 ) -> list[FindingDraft]:
-    rules = PLATFORM_RULES[platform]
+    markets = market_registry.clean(markets)
+    family = PLATFORMS[platform].family
+    rules = rules_for(platform, markets)
     items = collect_text_items(caption, hashtags, extraction)
     findings: list[FindingDraft] = []
 
@@ -157,10 +253,18 @@ def run_deterministic_checks(
     disclosed = caption_disclosure(caption, sponsors)
     if (promo_hits or declared) and not disclosed:
         start, end = _span(promo_hits)
-        label = (
-            "YouTube's paid promotion setting"
-            if platform == "youtube_shorts"
-            else "Instagram's Paid partnership label"
+        label = PLATFORMS[platform].disclosure_setting
+        weak = [
+            f.text
+            for f in market_disclosure.find_labels(caption)
+            if not f.denied and not any(f.clear_in(m) for m in markets)
+        ]
+        weak_note = (
+            f" The caption uses {_quote_list(weak)}, which "
+            f"{_join_words([market_registry.MARKETS[m].regulator for m in markets])} "
+            "guidance does not treat as a clear disclosure."
+            if weak
+            else ""
         )
         findings.append(
             FindingDraft(
@@ -178,13 +282,12 @@ def run_deterministic_checks(
                     "does not resolve this check. If you received payment, "
                     "free products, commission or any other benefit, the platform expects this "
                     "to be disclosed. This check cannot tell whether a commercial relationship "
-                    "actually exists."
+                    "actually exists." + weak_note
                 ),
                 suggested_action=(
                     f"If this is a paid, gifted or affiliate promotion, enable {label} when "
-                    "publishing and add a clear disclosure (e.g. #ad / 'Paid partnership') at "
-                    "the start of the caption and on screen. Indian creators should also follow "
-                    "ASCI influencer advertising guidelines."
+                    "publishing and add a clear disclosure (e.g. 'Ad') at the start of the "
+                    "caption and on screen. " + " ".join(MARKET_ADVICE[m] for m in markets)
                 ),
                 start_seconds=start,
                 end_seconds=end,
@@ -219,6 +322,10 @@ def run_deterministic_checks(
                 requires_human_review=True,
             )
         )
+
+    # 1b. A label that is clear in one market can be unclear in another ---------
+    if disclosed:
+        findings.extend(_market_label_findings(caption, markets, rules["disclosure"]))
 
     # 2. Strong efficacy / guarantee claims ----------------------------------
     # A finance "guaranteed returns" line is a community-guideline scam flag, not a
@@ -261,7 +368,7 @@ def run_deterministic_checks(
     findings.extend(run_community_guideline_checks(platform, items))
 
     # 3. YouTube hashtag limit -------------------------------------------------
-    if platform == "youtube_shorts" and len(hashtags) > YOUTUBE_HASHTAG_LIMIT:
+    if family == "youtube" and len(hashtags) > YOUTUBE_HASHTAG_LIMIT:
         findings.append(
             FindingDraft(
                 source="deterministic",
@@ -293,7 +400,9 @@ def run_deterministic_checks(
 
     # 4. Other-app watermarks in on-screen text --------------------------------
     ocr_items = [i for i in items if i.source == "ocr"]
-    wm_hits = _matches(ocr_items, _WATERMARK_RE)
+    # TikTok's own watermark is not "another app" on a TikTok post.
+    watermarks = _WATERMARK_RE[1:] if family == "tiktok" else _WATERMARK_RE
+    wm_hits = _matches(ocr_items, watermarks)
     if wm_hits:
         start, end = _span(wm_hits)
         findings.append(
@@ -366,11 +475,10 @@ def run_deterministic_checks(
     # 6. Checks this system cannot perform (always shown) ----------------------
     # cross_checked reviews the owner-supplied file the same way as a full upload.
     if analysis_mode not in {"full_video", "cross_checked"}:
-        what = (
-            "the caption and cover thumbnail"
-            if analysis_mode == "caption_thumbnail"
-            else "the title, description, tags and (if available) captions"
-        )
+        what = {
+            "caption_thumbnail": "the caption and cover thumbnail",
+            "caption_only": "the caption and hashtags",
+        }.get(analysis_mode, "the title, description, tags and (if available) captions")
         findings.append(
             FindingDraft(
                 source="deterministic",
@@ -451,13 +559,85 @@ def run_deterministic_checks(
                     "Watch the cut yourself for anything the words do not mention. "
                     "Do not treat a clear wording check as a clearance of the picture."
                 ),
-                policy_rule_ids=(
-                    ["YT-CG-OVERVIEW"] if platform == "youtube_shorts" else ["META-CS-OVERVIEW"]
-                ),
+                policy_rule_ids=rules["overview"],
                 requires_human_review=False,
             )
         )
     return findings
+
+
+def has_promo_signals(caption: str, hashtags: list[str], extraction: dict[str, Any]) -> bool:
+    """Promotion wording (codes, discounts, 'link in bio') anywhere in the content."""
+    return bool(_matches(collect_text_items(caption, hashtags, extraction), _PROMO_RE))
+
+
+def _join_words(values: list[str]) -> str:
+    if len(values) <= 1:
+        return "".join(values)
+    return ", ".join(values[:-1]) + " and " + values[-1]
+
+
+def _quote_list(values: list[str]) -> str:
+    return _join_words([f'"{v}"' for v in dict.fromkeys(values)])
+
+
+def _market_label_findings(
+    caption: str, markets: list[str], disclosure_rules: list[str]
+) -> list[FindingDraft]:
+    """One finding when the caption's label is clear in some selected markets but not all."""
+    assessment = market_disclosure.assess(caption, markets)["by_market"]
+    short = [m for m in markets if assessment[m]["status"] not in {"clear", "none"}]
+    if not short:
+        return []
+    unclear = [x for m in short for x in assessment[m]["unclear_labels"]]
+    buried = [m for m in short if assessment[m]["status"] == "buried"]
+    regulators = _join_words([market_registry.MARKETS[m].regulator for m in short])
+    where = market_registry.names(short)
+    market_rules = {r for m in short for r in MARKET_RULES[m].get("disclosure", [])}
+    if unclear:
+        explanation = (
+            f"The caption discloses with {_quote_list(unclear)}. {regulators} guidance does "
+            f"not treat that wording as a clear disclosure, so viewers in {where} may not "
+            "recognise the post as advertising. Regulators differ on which labels they accept; "
+            "a label that works in one market can fall short in another."
+        )
+    else:
+        explanation = (
+            f"A clear label is in the caption but not at the start, where {regulators} "
+            f"guidance expects it for viewers in {where}. A label after a line break, after "
+            "several hashtags or behind 'more' is easy to miss."
+        )
+    return [
+        FindingDraft(
+            source="deterministic",
+            category="disclosure",
+            finding_type="suspected_violation",
+            severity="medium",
+            confidence="medium",
+            title=(
+                f"Disclosure label may not be clear enough for {where}"
+                if unclear or not buried
+                else f"Disclosure is not at the start of the caption for {where}"
+            ),
+            explanation=explanation,
+            suggested_action=(
+                "Open the caption with 'Ad', which every selected market's guidance treats "
+                "as clear. " + " ".join(MARKET_ADVICE[m] for m in short)
+            ),
+            evidence=[
+                {
+                    "source": "caption",
+                    "ref_id": "CAPTION",
+                    "detail": f"Label used: {_quote_list(unclear)}"
+                    if unclear
+                    else "Label is not in the opening of the caption",
+                    "timestamp": None,
+                }
+            ],
+            policy_rule_ids=[r for r in disclosure_rules if r in market_rules],
+            requires_human_review=True,
+        )
+    ]
 
 
 def _finance_guarantee_only(hit: tuple[TextItem, str]) -> bool:
@@ -466,6 +646,4 @@ def _finance_guarantee_only(hit: tuple[TextItem, str]) -> bool:
         return False
     if not is_finance_claim(item.text):
         return False
-    return not any(
-        pat.search(item.text) for pat in _HEALTH_RE if pat.pattern != r"\bguarantee[sd]?\b"
-    )
+    return not any(pat.search(item.text) for pat in _HEALTH_RE if pat.pattern != _GUARANTEE)

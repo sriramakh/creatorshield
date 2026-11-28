@@ -5,6 +5,8 @@
 #   open http://localhost:3000
 #
 # Put secrets in backend/.env (git-ignored); it is loaded by api and worker.
+# Development has no login, so ports are published on 127.0.0.1 only: other
+# machines on your network cannot reach the API or the app.
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,6 +19,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U creatorshield"]
       interval: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:8-alpine
@@ -24,6 +27,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 10
+    restart: unless-stopped
 
   api:
     build: ./backend
@@ -32,13 +36,23 @@ services:
       DATABASE_URL: postgresql+psycopg://creatorshield:creatorshield_dev@postgres:5432/creatorshield
       REDIS_URL: redis://redis:6379/0
       STORAGE_DIR: /app/var/storage
+      UPLOAD_TMP_DIR: /app/var/tmp
       HF_HOME: /app/var/hf
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     volumes: [media:/app/var]
+    # Healthy only after migrations ran and the API answers, so the worker never
+    # starts against a missing schema.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    restart: unless-stopped
 
   worker:
     build: ./backend
@@ -47,17 +61,25 @@ services:
     command: python -m app.worker
     volumes: [media:/app/var]
     depends_on:
-      api: { condition: service_started }
+      api: { condition: service_healthy }
     deploy:
       resources:
         limits: { memory: 3g }
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "--check"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       args: { NEXT_PUBLIC_API_URL: "http://localhost:8000" }
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     depends_on: [api]
+    restart: unless-stopped
 
 volumes:
   pgdata:

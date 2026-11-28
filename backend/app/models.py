@@ -80,6 +80,15 @@ class Analysis(Base):
     source_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     sponsorship: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Audience markets whose advertising guidance applies (IN, US, UK). Null on
+    # reviews created before markets existed: read as the configured default.
+    markets: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # The sponsor's brief (app.analysis.brief.BriefSpec) and how the content measured up.
+    brief: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    brief_check: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Publish-readiness verdict (ready | review | fix_first), kept in step with the
+    # findings so lists and insights do not have to load them.
+    readiness_verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     # Optional client / account name (agency use). Groups the catalogue so a match
     # with another client's footage can be told apart from the same client's reposts.
@@ -250,3 +259,62 @@ class AgencyBinding(Base):
     __table_args__ = (CheckConstraint("id = 1", name="single_agency"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     agency_id: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class BrandBrief(Base):
+    """A saved sponsor brief that reviews can be checked against."""
+
+    __tablename__ = "brand_briefs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    brand: Mapped[str] = mapped_column(String(120), default="")
+    spec: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class WorkspaceSettings(Base):
+    """Preferences for this installation (one row)."""
+
+    __tablename__ = "workspace_settings"
+    __table_args__ = (CheckConstraint("id = 1", name="single_workspace"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    # creator = one person reviewing their own posts; agency = many clients.
+    mode: Mapped[str] = mapped_column(String(16), default="creator")
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+    default_platform: Mapped[str] = mapped_column(String(32), default="instagram_reels")
+    default_markets: Mapped[list[str]] = mapped_column(JSON, default=list)
+    default_language: Mapped[str] = mapped_column(String(8), default="en")
+    onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AnalysisStat(Base):
+    """Outcome of a completed review, without any of its content.
+
+    Reviews are deleted after the retention period; these rows keep only what
+    the insights page needs (date, platform, markets, verdict, risk indicator,
+    finding counts and the client label). An explicit delete removes the row.
+    """
+
+    __tablename__ = "analysis_stats"
+
+    analysis_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    platform: Mapped[str] = mapped_column(String(32))
+    markets: Mapped[list[str]] = mapped_column(JSON, default=list)
+    client_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    analysis_mode: Mapped[str] = mapped_column(String(24), default="full_video")
+    risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    open_findings: Mapped[int] = mapped_column(Integer, default=0)
+    severity_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    # Checklist group (disclosure, community, claims, rights, brief) -> open findings.
+    group_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)

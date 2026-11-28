@@ -5,15 +5,29 @@
 #     DB_PASSWORD=... docker compose -p creatorshield -f deploy/compose.port.yml up --build -d
 #
 # Only the gateway publishes a port. ENV_FILE must set PILOT_USERNAME and
-# PILOT_PASSWORD_HASH (the API refuses requests without a login) plus provider keys.
+# PILOT_PASSWORD_HASH plus provider keys: REQUIRE_LOGIN=true makes the API and worker
+# refuse to start without them (APP_ENV stays development because there is no HTTPS).
+# Optionally set AGENCY_ID to bind the database to one agency as in production.
+x-healthcheck: &probe
+  interval: 15s
+  timeout: 5s
+  retries: 5
+
 services:
   gateway:
     image: caddy:2-alpine
     ports: ["${PUBLIC_PORT:?required}:8080"]
+    environment:
+      MAX_REQUEST_BODY: ${MAX_REQUEST_BODY:-5121MB}
     volumes:
       - ./Caddyfile.port:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-    depends_on: [api, frontend]
+    healthcheck:
+      <<: *probe
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
+    depends_on:
+      api: {condition: service_healthy}
+      frontend: {condition: service_healthy}
     restart: unless-stopped
   postgres:
     image: postgres:17-alpine
@@ -29,26 +43,35 @@ services:
     restart: unless-stopped
   redis:
     image: redis:8-alpine
+    healthcheck:
+      <<: *probe
+      test: ["CMD", "redis-cli", "ping"]
     restart: unless-stopped
   api:
     build: ../backend
     env_file: ${ENV_FILE:?required}
     environment: &env
+      REQUIRE_LOGIN: "true"
+      AGENCY_ID: ${AGENCY_ID:-}
       DATABASE_URL: postgresql+psycopg://creatorshield:${DB_PASSWORD}@postgres:5432/creatorshield
       REDIS_URL: redis://redis:6379/0
       STORAGE_DIR: /app/var/storage
+      UPLOAD_TMP_DIR: /app/var/tmp
       HF_HOME: /app/var/hf
       FRONTEND_URL: ${FRONTEND_URL:?required}
       API_PUBLIC_URL: ${FRONTEND_URL}
+      TRUSTED_PROXIES: '["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]'
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
     volumes: ["media:/app/var"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"]
-      interval: 5s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=4)"]
+      interval: 10s
+      timeout: 5s
       retries: 30
+      start_period: 30s
     depends_on:
       postgres: {condition: service_healthy}
-      redis: {condition: service_started}
+      redis: {condition: service_healthy}
     restart: unless-stopped
   worker:
     build: ../backend
@@ -60,6 +83,11 @@ services:
     deploy:
       resources:
         limits: {cpus: "2", memory: 6g}
+    healthcheck:
+      <<: *probe
+      test: ["CMD", "python", "-m", "app.worker", "--check"]
+      start_period: 60s
+    stop_grace_period: 60s
     depends_on:
       api: {condition: service_healthy}
     restart: unless-stopped
@@ -67,6 +95,10 @@ services:
     build:
       context: ../frontend
       args: {NEXT_PUBLIC_API_URL: ""}
+    healthcheck:
+      <<: *probe
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      start_period: 30s
     restart: unless-stopped
 volumes:
   pgdata:

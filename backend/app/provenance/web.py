@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.integrations.common import get_http_client
 from app.provenance import budget
-from app.provenance.common import LookupFailed
+from app.provenance.common import LookupFailed, ProviderMayHaveBilled, classify_http_error
 from app.provenance.fingerprint import frame_distance_matrix, thumbnail_hash
 
 log = logging.getLogger(__name__)
@@ -112,19 +112,30 @@ def _google(images: list[bytes], settings: Settings, http: httpx.Client) -> list
             for img in images
         ]
     }
-    response = http.post(
-        settings.google_vision_url,
-        params={"key": settings.google_vision_api_key.get_secret_value()},
-        json=body,
-    )
+    try:
+        response = http.post(
+            settings.google_vision_url,
+            params={"key": settings.google_vision_api_key.get_secret_value()},
+            json=body,
+        )
+    except httpx.HTTPError as exc:
+        raise classify_http_error(exc, "Web image search") from exc
     if response.status_code >= 400:
         raise LookupFailed(f"Web image search returned HTTP {response.status_code}.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ProviderMayHaveBilled("Web image search returned an unreadable answer.") from exc
+    items = payload.get("responses") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        raise ProviderMayHaveBilled("Web image search returned an unexpected answer.")
     out = []
-    for item in response.json().get("responses") or []:
-        if item.get("error"):
+    for item in items:
+        if not isinstance(item, dict) or item.get("error"):
             out.append({"error": "The image search service could not process this frame."})
         else:
-            out.append(summarise(item.get("webDetection") or {}))
+            detection = item.get("webDetection")
+            out.append(summarise(detection if isinstance(detection, dict) else {}))
     return out
 
 
@@ -191,34 +202,56 @@ def search(
         return block
 
     cost = settings.web_detection_cost_per_image_usd
+    reserved: list[tuple[dict[str, Any], bytes, budget.Reservation]] = []
     try:
-        budget.reserve(db, cost * len(pending), settings)
-        with get_http_client() as http:
-            results = _google([data for _, data, _ in pending], settings, http)
-    except budget.BudgetExceeded as exc:
-        block["status"] = "budget_exceeded"
-        block["detail"] = exc.user_message
-        return block
-    except LookupFailed as exc:
-        block["status"] = "failed"
-        block["detail"] = exc.user_message
-        return block
-    except httpx.HTTPError:
-        log.warning("web image search request failed")
-        block["status"] = "failed"
-        block["detail"] = "Web image search service unreachable."
-        return block
-    for (entry, _, key), result in zip(pending, results, strict=False):
-        if "error" not in result:
-            budget.record(
+        for entry, data, key in pending:
+            hit, reservation = budget.acquire(
                 db,
                 service=SERVICE,
                 provider=provider,
                 key=key,
                 est_cost=cost,
-                response=result,
+                settings=settings,
                 analysis_id=analysis_id,
             )
+            if hit is not None:  # answered by a concurrent request meanwhile
+                block["frames"].append({**entry, **hit, "cached": True})
+            else:
+                assert reservation is not None
+                reserved.append((entry, data, reservation))
+    except budget.BudgetExceeded as exc:
+        for _, _, reservation in reserved:
+            budget.release(db, reservation)
+        block["status"] = "budget_exceeded"
+        block["detail"] = exc.user_message
+        return block
+    if not reserved:
+        block["frames"].sort(key=lambda f: f.get("timestamp") or 0)
+        return block
+    try:
+        with get_http_client() as http:
+            results = _google([data for _, data, _ in reserved], settings, http)
+    except ProviderMayHaveBilled as exc:
+        log.warning("web image search answer lost; keeping the estimated charge")
+        for _, _, reservation in reserved:
+            budget.mark_uncertain(db, reservation, exc.user_message)
+        block["status"] = "failed"
+        block["detail"] = exc.user_message
+        return block
+    except BaseException as exc:
+        for _, _, reservation in reserved:
+            budget.release(db, reservation)
+        if isinstance(exc, LookupFailed):
+            block["status"] = "failed"
+            block["detail"] = exc.user_message
+            return block
+        raise
+    for i, (entry, _, reservation) in enumerate(reserved):
+        result = results[i] if i < len(results) else {"error": "No answer for this frame."}
+        if "error" in result:
+            budget.release(db, reservation)
+        else:
+            budget.settle(db, reservation, result)
         block["frames"].append({**entry, **result, "cached": False})
     block["frames"].sort(key=lambda f: f.get("timestamp") or 0)
     return block

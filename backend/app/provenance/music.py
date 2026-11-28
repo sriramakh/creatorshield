@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.integrations.common import get_http_client
+from app.media.probe import MediaError, input_args
 from app.provenance import budget
-from app.provenance.common import LookupFailed
+from app.provenance.common import LookupFailed, ProviderMayHaveBilled, classify_http_error
 
 log = logging.getLogger(__name__)
 
@@ -44,36 +46,44 @@ def pick_clips(
 
 
 def cut_clip(video: Path, start: float, end: float, out: Path) -> bytes:
-    proc = subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-nostdin",
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            f"{start:.2f}",
-            "-t",
-            f"{end - start:.2f}",
-            "-i",
-            str(video),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "22050",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "96k",
-            str(out),
-        ],
-        capture_output=True,
-        timeout=60,
-        check=False,
-    )
+    try:
+        args = input_args(video)
+    except MediaError as exc:
+        raise LookupFailed("The video file cannot be read for song identification.") from exc
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{start:.2f}",
+                "-t",
+                f"{end - start:.2f}",
+                *args,
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "22050",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "96k",
+                str(out),
+            ],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        out.unlink(missing_ok=True)
+        raise LookupFailed("Cutting an audio clip for song identification took too long.") from exc
     if proc.returncode != 0 or not out.exists():
+        out.unlink(missing_ok=True)
         raise LookupFailed("Could not cut an audio clip for song identification.")
     data = out.read_bytes()
     out.unlink(missing_ok=True)
@@ -82,21 +92,35 @@ def cut_clip(video: Path, start: float, end: float, out: Path) -> bytes:
 
 def _audd(clip: bytes, settings: Settings, http: httpx.Client) -> dict[str, Any]:
     assert settings.audd_api_token is not None
-    response = http.post(
-        settings.audd_api_url,
-        data={"api_token": settings.audd_api_token.get_secret_value(), "return": "spotify"},
-        files={"file": ("clip.mp3", clip, "audio/mpeg")},
-    )
+    try:
+        response = http.post(
+            settings.audd_api_url,
+            data={"api_token": settings.audd_api_token.get_secret_value(), "return": "spotify"},
+            files={"file": ("clip.mp3", clip, "audio/mpeg")},
+        )
+    except httpx.HTTPError as exc:
+        raise classify_http_error(exc, "The song identification service") from exc
     if response.status_code >= 400:
         raise LookupFailed(f"Song identification service returned HTTP {response.status_code}.")
-    body = response.json()
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise ProviderMayHaveBilled(
+            "The song identification service returned an unreadable answer."
+        ) from exc
+    if not isinstance(body, dict):
+        raise ProviderMayHaveBilled(
+            "The song identification service returned an unexpected answer."
+        )
     if body.get("status") != "success":
-        code = (body.get("error") or {}).get("error_code")
+        error = body.get("error")
+        code = error.get("error_code") if isinstance(error, dict) else None
         raise LookupFailed(f"Song identification failed (provider error {code}).")
     result = body.get("result")
-    if not result:
+    if not isinstance(result, dict) or not result:
         return {"matched": False}
-    spotify = result.get("spotify") or {}
+    raw_spotify = result.get("spotify")
+    spotify: dict[str, Any] = raw_spotify if isinstance(raw_spotify, dict) else {}
     return {
         "matched": True,
         "title": result.get("title"),
@@ -155,36 +179,51 @@ def identify(
         for start, end in clips:
             entry: dict[str, Any] = {"start": start, "end": end}
             try:
-                clip = cut_clip(video, start, end, work_dir / "music_clip.mp3")
+                clip = cut_clip(video, start, end, work_dir / f"music_clip-{uuid.uuid4().hex}.mp3")
                 key = budget.cache_key(SERVICE, provider, clip)
-                hit = budget.cached(db, key, settings)
-                if hit is not None:
-                    entry.update(hit, cached=True)
-                elif provider == "mock":
-                    entry.update(_mock(), cached=False)
+                if provider == "mock":
+                    hit = budget.cached(db, key, settings)
+                    entry.update(hit or _mock(), cached=hit is not None)
                 else:
-                    cost = settings.audd_cost_per_request_usd
-                    budget.reserve(db, cost, settings)
-                    result = _audd(clip, settings, http)
-                    budget.record(
-                        db,
-                        service=SERVICE,
-                        provider=provider,
-                        key=key,
-                        est_cost=cost,
-                        response=result,
-                        analysis_id=analysis_id,
-                    )
-                    entry.update(result, cached=False)
+                    entry.update(_identify_paid(db, http, clip, key, settings, analysis_id))
             except budget.BudgetExceeded as exc:
                 entry.update(matched=False, error=exc.user_message)
                 block["status"] = "budget_exceeded"
             except LookupFailed as exc:
                 entry.update(matched=False, error=exc.user_message)
                 block["status"] = "partial"
-            except httpx.HTTPError:
-                log.warning("song identification request failed")
-                entry.update(matched=False, error="Song identification service unreachable.")
-                block["status"] = "partial"
             block["clips"].append(entry)
     return block
+
+
+def _identify_paid(
+    db: Session,
+    http: httpx.Client,
+    clip: bytes,
+    key: str,
+    settings: Settings,
+    analysis_id: Any,
+) -> dict[str, Any]:
+    hit, reservation = budget.acquire(
+        db,
+        service=SERVICE,
+        provider=settings.music_id_provider,
+        key=key,
+        est_cost=settings.audd_cost_per_request_usd,
+        settings=settings,
+        analysis_id=analysis_id,
+    )
+    if hit is not None:
+        return {**hit, "cached": True}
+    assert reservation is not None
+    try:
+        result = _audd(clip, settings, http)
+    except ProviderMayHaveBilled as exc:
+        log.warning("song identification answer lost; keeping the estimated charge")
+        budget.mark_uncertain(db, reservation, exc.user_message)
+        raise
+    except BaseException:
+        budget.release(db, reservation)
+        raise
+    budget.settle(db, reservation, result)
+    return {**result, "cached": False}

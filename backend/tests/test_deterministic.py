@@ -114,3 +114,59 @@ def test_risk_levels() -> None:
     assert compute_risk([F("medium")])[1] == "moderate"
     assert compute_risk([F("high", confidence="low")])[1] == "moderate"
     assert compute_risk([F("critical", "cannot_check")]) == (0, "low")
+
+
+# --- Regressions from the analysis-engine review -------------------------------
+
+PROMO_TITLE = "Promotional language without a visible sponsorship disclosure"
+CLAIM_TITLE = "Absolute claims detected ('cure', 'guaranteed', 'miracle')"
+
+
+def _titles_for(segment: str, caption: str = "") -> list[str]:
+    return titles(
+        run_deterministic_checks("youtube_shorts", caption, [], extraction([segment]), 30)
+    )
+
+
+def test_code_word_in_ordinary_speech_is_not_a_promo_code() -> None:
+    for line in [
+        "let me show you the code for this function",
+        "the code is simple",
+        "you can use code to automate this",
+        "error code 404 means not found",
+    ]:
+        assert PROMO_TITLE not in _titles_for(line), line
+
+
+def test_real_promo_codes_still_flag() -> None:
+    for line in ["Use code GLOW20 for 20% off", "use code SAVE at checkout", "code glow20"]:
+        assert PROMO_TITLE in _titles_for(line), line
+
+
+def test_everyday_cure_and_guarantee_are_not_health_claims() -> None:
+    for line in ["this cured ham is amazing", "salt-cured salmon", "I guarantee you will laugh"]:
+        assert CLAIM_TITLE not in _titles_for(line), line
+
+
+def test_health_claims_still_flag() -> None:
+    for line in [
+        "This cures diabetes",
+        "guaranteed weight loss in a week",
+        "I guarantee results in 7 days",
+        "miracle cream",
+    ]:
+        assert CLAIM_TITLE in _titles_for(line), line
+
+
+def test_low_confidence_critical_is_not_counted_like_a_confident_one() -> None:
+    from types import SimpleNamespace
+
+    def f(severity: str, confidence: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            severity=severity, confidence=confidence, finding_type="suspected_violation"
+        )
+
+    assert compute_risk([f("critical", "high")])[1] == "high"
+    assert compute_risk([f("critical", "low")])[1] == "elevated"
+    assert compute_risk([f("high", "medium")])[1] == "elevated"
+    assert compute_risk([f("high", "low")])[1] == "low"  # score 7: below the moderate band

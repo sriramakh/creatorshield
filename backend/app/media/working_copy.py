@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import Settings
-from app.media.probe import MediaError, MediaInfo, media_timeout
+from app.media.probe import MediaError, MediaInfo, input_args, media_timeout
 
 
 def needs_working_copy(info: MediaInfo, settings: Settings) -> bool:
@@ -40,8 +40,7 @@ def make_working_copy(src: Path, dst: Path, info: MediaInfo, settings: Settings)
         "-y",
         "-hwaccel",
         "auto",  # hardware decode where available; falls back to software
-        "-i",
-        str(src),
+        *input_args(src),
         "-map",
         "0:v:0",
         "-map",
@@ -73,6 +72,8 @@ def make_working_copy(src: Path, dst: Path, info: MediaInfo, settings: Settings)
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             # Software decode of 4K HEVC runs near real time on a laptop CPU.
             timeout=media_timeout(2 * info.duration_seconds, base=300.0),
             check=False,

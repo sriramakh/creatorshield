@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.creator import resolve_brief, resolve_markets
 from app.config import get_settings
 from app.db import get_db
 from app.integrations import youtube as yt
@@ -20,12 +21,12 @@ from app.integrations.common import IntegrationError
 from app.integrations.connections import (
     PLATFORMS,
     complete_authorization,
-    disconnect,
+    disconnect_account,
     list_media,
     resolve_media,
     start_authorization,
 )
-from app.jobs import enqueue_analysis, purge_expired
+from app.jobs import enqueue_analysis
 from app.models import Analysis, PlatformConnection
 from app.schemas import ConnectionOut, CreateAnalysisOut, ImportRequest
 
@@ -34,6 +35,8 @@ router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
 
 TARGET_PLATFORM = {"instagram": "instagram_reels", "youtube": "youtube_shorts"}
+# YouTube treats uploads longer than this as regular videos, not Shorts.
+SHORTS_MAX_SECONDS = 180.0
 # Only these fixed codes are ever reflected back to the frontend.
 CALLBACK_ERRORS = {"denied", "failed", "state", "not_configured"}
 
@@ -117,16 +120,23 @@ def oauth_callback(
 
 
 @router.delete("/connections/{connection_id}")
-def remove_connection(connection_id: uuid.UUID, db: DB) -> dict[str, int]:
+def remove_connection(connection_id: uuid.UUID, db: DB) -> dict[str, Any]:
+    """Disconnect an account. ``revoked`` is False when the platform could not be told
+    to revoke access (the local data is deleted either way) and None when the platform
+    has no revocation call."""
     conn = _get_conn(db, connection_id)
-    deleted = disconnect(db, conn, get_settings())
-    return {"deleted_analyses": deleted}
+    result = disconnect_account(db, conn, get_settings())
+    return {
+        "deleted_analyses": result.deleted_analyses,
+        "revoked": result.revoked,
+        "revoke_error": result.revoke_error,
+    }
 
 
 @router.get("/connections/{connection_id}/media")
 def connection_media(connection_id: uuid.UUID, db: DB, cursor: str | None = None) -> dict[str, Any]:
     conn = _get_conn(db, connection_id)
-    if cursor is not None and len(cursor) > 300:
+    if cursor is not None and (len(cursor) > 300 or not cursor.isprintable()):
         raise HTTPException(422, "Invalid cursor.")
     try:
         items, nxt = list_media(db, conn, get_settings(), cursor)
@@ -144,15 +154,21 @@ def import_analysis(body: ImportRequest, db: DB) -> CreateAnalysisOut:
     except IntegrationError as exc:
         raise _http_error(exc) from exc
 
-    purge_expired(db)
     hours = settings.retention_hours
+    platform = TARGET_PLATFORM[conn.platform]
     if conn.platform == "youtube":
         hours = min(hours, settings.youtube_max_retention_hours)
+        if (media.get("duration_seconds") or 0) > SHORTS_MAX_SECONDS + 0.5:
+            platform = "youtube_video"
+    markets = resolve_markets(db, body.markets)
+    brief = resolve_brief(db, body.brief, body.brief_id)
     waiting = body.attach_owner_file
     analysis = Analysis(
         sponsorship=body.sponsorship.model_dump(),
+        markets=markets,
+        brief=brief.model_dump() if brief else None,
         expires_at=datetime.now(UTC) + timedelta(hours=hours),
-        platform=TARGET_PLATFORM[conn.platform],
+        platform=platform,
         language=body.language,
         caption=media.get("caption") or "",
         hashtags=[],

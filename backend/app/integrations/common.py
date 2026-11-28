@@ -28,6 +28,17 @@ def get_http_client() -> httpx.Client:
     return httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=False)
 
 
+def send(http: httpx.Client, platform: str, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    """One platform request; transport failures (timeouts, refused connections, broken
+    streams) become an :class:`IntegrationError` so callers' fallbacks apply."""
+    try:
+        return http.request(method, url, **kwargs)
+    except httpx.TimeoutException as exc:
+        raise IntegrationError(f"{platform} did not respond in time. Try again.", 504) from exc
+    except httpx.HTTPError as exc:
+        raise IntegrationError(f"{platform} could not be reached. Try again.", 502) from exc
+
+
 def raise_for_platform(response: httpx.Response, platform: str) -> dict[str, Any]:
     """Return the JSON body or raise an IntegrationError without leaking tokens."""
     try:
@@ -90,17 +101,35 @@ def _redis():  # type: ignore[no-untyped-def]
     return get_redis()
 
 
-def create_oauth_state(platform: str, extra: dict[str, Any] | None = None) -> str:
+# Binding: the state is a random, single-use, 10-minute secret stored server-side,
+# so it cannot be forged or replayed. It is not tied to the browser that started
+# the flow unless the caller passes ``binding`` (e.g. a value from an HttpOnly
+# cookie set by the authorize endpoint). Without it, completing a flow needs a
+# state that only an authenticated user of this installation can mint (the pilot
+# login protects POST /connections/{p}/authorize), which is why a login-CSRF
+# "connect the attacker's account" attack needs valid credentials already.
+
+
+def _binding_digest(binding: str) -> str:
+    return hashlib.sha256(binding.encode()).hexdigest()
+
+
+def create_oauth_state(
+    platform: str, extra: dict[str, Any] | None = None, *, binding: str | None = None
+) -> str:
     state = secrets.token_urlsafe(32)
     payload = {"platform": platform, **(extra or {})}
+    if binding:
+        payload["binding"] = _binding_digest(binding)
     _redis().set(
         _STATE_PREFIX + state, json.dumps(payload), ex=get_settings().oauth_state_ttl_seconds
     )
     return state
 
 
-def consume_oauth_state(state: str, platform: str) -> dict[str, Any]:
-    """Single-use: the state is deleted as it is read."""
+def consume_oauth_state(state: str, platform: str, *, binding: str | None = None) -> dict[str, Any]:
+    """Single-use: the state is deleted as it is read. A state created with a
+    ``binding`` is only accepted together with the same binding value."""
     if not state or len(state) > 200:
         raise IntegrationError("Invalid OAuth state.", 400)
     raw = _redis().getdel(_STATE_PREFIX + state)
@@ -109,6 +138,11 @@ def consume_oauth_state(state: str, platform: str) -> dict[str, Any]:
     payload: dict[str, Any] = json.loads(raw)
     if payload.get("platform") != platform:
         raise IntegrationError("OAuth state does not match this platform.", 400)
+    expected = payload.pop("binding", None)
+    if expected is not None and (
+        not binding or not secrets.compare_digest(expected, _binding_digest(binding))
+    ):
+        raise IntegrationError("OAuth state does not belong to this browser session.", 400)
     return payload
 
 

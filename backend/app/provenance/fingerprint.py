@@ -27,7 +27,14 @@ from typing import Any
 
 import numpy as np
 
-from app.media.probe import MediaError, media_timeout
+from app.media.probe import (
+    IMAGE_DEMUXERS,
+    VIDEO_DEMUXERS,
+    MediaError,
+    input_args,
+    media_timeout,
+    sniff_container,
+)
 
 FRAME_FPS = 2.0
 FRAME_STEP = 1.0 / FRAME_FPS
@@ -40,6 +47,14 @@ _MIN_EDGE_BITS = 24  # frames with fewer edges (black, solid colour, fades) are 
 
 VIDEO_DISTANCE_MAX = 0.2  # share of edge bits that differ
 VIDEO_MIN_ALIGNED = 6  # aligned frames (3 s at 2 fps)
+# Alignment must be specific: a matched frame has to be clearly closer to its
+# aligned reference frame than to any reference frame more than SPECIFIC_WINDOW
+# frames away. Different takes on one static set look alike at *every* offset,
+# so none of their frames is specific; a real copy has many.
+SPECIFIC_WINDOW = 6  # frames (3 s)
+SPECIFIC_MARGIN = 0.04
+SPECIFIC_MIN = 3
+PREFILTER_STRIDE = 4  # any run of VIDEO_MIN_ALIGNED consecutive matches contains a sample
 AUDIO_BER_MAX = 0.35  # bit error rate; unrelated audio sits near 0.5
 AUDIO_MIN_ITEMS = 24  # ~3 s
 AUDIO_WINDOW = 16
@@ -106,7 +121,17 @@ def frame_hashes_from_raw(raw: bytes) -> list[FrameHash | None]:
 
 
 def video_hashes(video: Path, max_seconds: float) -> list[FrameHash | None]:
-    proc = subprocess.run(
+    try:
+        proc = _run_video_hashes(video, max_seconds)
+    except subprocess.TimeoutExpired as exc:
+        raise MediaError("Reading video frames for fingerprinting took too long.") from exc
+    if proc.returncode != 0:
+        raise MediaError("Could not read video frames for fingerprinting.")
+    return frame_hashes_from_raw(proc.stdout)
+
+
+def _run_video_hashes(video: Path, max_seconds: float) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
         [
             "ffmpeg",
             "-hide_banner",
@@ -115,8 +140,7 @@ def video_hashes(video: Path, max_seconds: float) -> list[FrameHash | None]:
             "error",
             "-t",
             f"{max_seconds:.2f}",
-            "-i",
-            str(video),
+            *input_args(video),
             "-vf",
             f"fps={FRAME_FPS},scale={_GRID_W}:{_GRID_H}:flags=area,format=gray",
             "-f",
@@ -127,18 +151,20 @@ def video_hashes(video: Path, max_seconds: float) -> list[FrameHash | None]:
         timeout=media_timeout(max_seconds, base=300.0),
         check=False,
     )
-    if proc.returncode != 0:
-        raise MediaError("Could not read video frames for fingerprinting.")
-    return frame_hashes_from_raw(proc.stdout)
 
 
 def audio_fingerprint(video: Path, max_seconds: float, fpcalc: str = "fpcalc") -> list[int]:
     """Chromaprint raw fingerprint, or [] when the file has no usable audio."""
+    # fpcalc probes its input itself, so only hand it files sniffed as a video container.
+    if sniff_container(video) not in VIDEO_DEMUXERS:
+        raise MediaError("Unsupported container format for audio fingerprinting.")
     try:
         proc = subprocess.run(
             [fpcalc, "-raw", "-json", "-length", str(int(max_seconds)), str(video)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=media_timeout(max_seconds, base=300.0),
             check=False,
         )
@@ -146,13 +172,16 @@ def audio_fingerprint(video: Path, max_seconds: float, fpcalc: str = "fpcalc") -
         raise MediaError(
             "Audio fingerprinting needs Chromaprint's fpcalc (brew install chromaprint)."
         ) from exc
+    except subprocess.TimeoutExpired:
+        return []
     if proc.returncode != 0:
         return []
     try:
-        values = json.loads(proc.stdout).get("fingerprint") or []
-    except json.JSONDecodeError:
+        data = json.loads(proc.stdout)
+        values = (data.get("fingerprint") if isinstance(data, dict) else None) or []
+        return [int(v) & 0xFFFFFFFF for v in values]
+    except (json.JSONDecodeError, TypeError, ValueError):
         return []
-    return [int(v) & 0xFFFFFFFF for v in values]
 
 
 def compute_fingerprint(
@@ -205,7 +234,22 @@ def _words(n: int) -> list[int]:
     return [(n >> (64 * (_WORDS - 1 - i))) & 0xFFFFFFFFFFFFFFFF for i in range(_WORDS)]
 
 
-def _as_arrays(hashes: list[FrameHash | None]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+@dataclass
+class HashArrays:
+    """Frame hashes parsed once into bit arrays (parsing hex is the slow part)."""
+
+    values: np.ndarray
+    masks: np.ndarray
+    ok: np.ndarray
+
+    def __len__(self) -> int:
+        return int(self.ok.size)
+
+    def take(self, index: np.ndarray) -> HashArrays:
+        return HashArrays(self.values[index], self.masks[index], self.ok[index])
+
+
+def hash_arrays(hashes: list[FrameHash | None]) -> HashArrays:
     values = np.zeros((len(hashes), _WORDS), dtype=np.uint64)
     masks = np.zeros((len(hashes), _WORDS), dtype=np.uint64)
     ok = np.zeros(len(hashes), dtype=bool)
@@ -216,11 +260,26 @@ def _as_arrays(hashes: list[FrameHash | None]) -> tuple[np.ndarray, np.ndarray, 
         values[i] = _words(v)
         masks[i] = _words(m)
         ok[i] = True
-    return values, masks, ok
+    return HashArrays(values, masks, ok)
 
 
 def _pop(a: np.ndarray) -> np.ndarray:
     return np.bitwise_count(a).sum(axis=-1).astype(np.float32)
+
+
+def _distances(q: HashArrays, r: HashArrays) -> np.ndarray:
+    dist = np.ones((len(q), len(r)), dtype=np.float32)
+    rv, rm = r.values, r.masks
+    rows = max(1, _PAIR_BLOCK // max(1, len(r)))
+    for a in range(0, len(q), rows):
+        bv, bm = q.values[a : a + rows, None, :], q.masks[a : a + rows, None, :]
+        both = bm & rm[None, :, :]
+        flipped = _pop((bv ^ rv[None, :, :]) & both)
+        only_one = _pop(bm ^ rm[None, :, :])
+        dist[a : a + rows] = (flipped + 0.5 * only_one) / np.maximum(_pop(bm | rm[None, :, :]), 1)
+    dist[~q.ok, :] = 1.0
+    dist[:, ~r.ok] = 1.0
+    return dist
 
 
 def frame_distance_matrix(
@@ -231,41 +290,79 @@ def frame_distance_matrix(
     Distance counts edges pointing the other way, plus half of the edges present
     in only one frame, over all edges present in either frame.
     """
-    qv, qm, q_ok = _as_arrays(query)
-    rv, rm, r_ok = _as_arrays(ref)
-    dist = np.ones((len(query), len(ref)), dtype=np.float32)
-    rows = max(1, _PAIR_BLOCK // max(1, len(ref)))
-    for a in range(0, len(query), rows):
-        bv, bm = qv[a : a + rows, None, :], qm[a : a + rows, None, :]
-        both = bm & rm[None, :, :]
-        flipped = _pop((bv ^ rv[None, :, :]) & both)
-        only_one = _pop(bm ^ rm[None, :, :])
-        dist[a : a + rows] = (flipped + 0.5 * only_one) / np.maximum(_pop(bm | rm[None, :, :]), 1)
-    dist[~q_ok, :] = 1.0
-    dist[:, ~r_ok] = 1.0
-    return dist, q_ok, r_ok
+    q, r = hash_arrays(query), hash_arrays(ref)
+    return _distances(q, r), q.ok, r.ok
 
 
-def _video_segment(
-    query: list[FrameHash | None], ref: list[FrameHash | None], step: float, mirrored: bool
-) -> Segment | None:
-    if mirrored:
-        query = [mirror_hash(h) if h is not None else None for h in query]
-    dist, q_ok, r_ok = frame_distance_matrix(query, ref)
-    if q_ok.sum() < VIDEO_MIN_ALIGNED or r_ok.sum() < VIDEO_MIN_ALIGNED:
+@dataclass
+class PreparedQuery:
+    """A query fingerprint parsed once for comparison with many catalogue entries."""
+
+    fp: Fingerprint
+    direct: HashArrays
+    mirrored: HashArrays
+    sample: np.ndarray  # query frames used by the cheap pre-filter
+
+
+def prepare(fp: Fingerprint) -> PreparedQuery:
+    hashes = fp.frame_hashes
+    direct = hash_arrays(hashes)
+    mirrored = hash_arrays([mirror_hash(h) if h is not None else None for h in hashes])
+    valid = np.nonzero(direct.ok)[0]
+    return PreparedQuery(fp, direct, mirrored, valid[::PREFILTER_STRIDE])
+
+
+def video_may_match(pq: PreparedQuery, ref: HashArrays) -> bool:
+    """Cheap test on every PREFILTER_STRIDE-th valid query frame. False means no video
+    match is possible: a 3 s run of matching frames always contains a sampled frame."""
+    if int(pq.direct.ok.sum()) < VIDEO_MIN_ALIGNED or int(ref.ok.sum()) < VIDEO_MIN_ALIGNED:
+        return False
+    if pq.sample.size == 0:
+        return False
+    for arrays in (pq.direct, pq.mirrored):
+        if float(_distances(arrays.take(pq.sample), ref).min()) <= VIDEO_DISTANCE_MAX:
+            return True
+    return False
+
+
+def _specific_frames(dist: np.ndarray, rows: np.ndarray, offset: int) -> int:
+    """How many matched query frames are clearly closer to their aligned reference
+    frame than to any reference frame outside the alignment window."""
+    m = dist.shape[1]
+    if rows.size == 0 or m == 0:
+        return 0
+    cols = np.arange(m, dtype=np.int32)
+    block = max(1, _PAIR_BLOCK // m)
+    count = 0
+    for a in range(0, rows.size, block):
+        part = rows[a : a + block].astype(np.int32)
+        sub = dist[part]
+        gap = np.abs(cols[None, :] - (part[:, None] + offset))
+        near = np.where(gap <= 1, sub, np.inf).min(axis=1)
+        far = np.where(gap > SPECIFIC_WINDOW, sub, np.inf).min(axis=1)
+        far = np.minimum(far, 1.0)  # nothing outside the window: nothing to confuse it with
+        count += int(np.count_nonzero(far - near >= SPECIFIC_MARGIN))
+    return count
+
+
+def _segment(q: HashArrays, r: HashArrays, step: float, mirrored: bool) -> Segment | None:
+    if q.ok.sum() < VIDEO_MIN_ALIGNED or r.ok.sum() < VIDEO_MIN_ALIGNED:
         return None
+    dist = _distances(q, r)
     qi, ri = np.nonzero(dist <= VIDEO_DISTANCE_MAX)
     if qi.size == 0:
         return None
     # Vote for the time offset, weighting closer frames more.
-    shift = len(query) - 1  # offsets start at -(len(query) - 1)
+    shift = len(q) - 1  # offsets start at -(len(query) - 1)
     votes = np.bincount(ri - qi + shift, weights=1.0 - dist[qi, ri] / VIDEO_DISTANCE_MAX)
     best_offset = int(np.argmax(votes)) - shift
     aligned = np.abs((ri - qi) - best_offset) <= 1
     matched_q = np.unique(qi[aligned])
     if matched_q.size < VIDEO_MIN_ALIGNED:
         return None
-    valid_query = int(q_ok.sum())
+    if _specific_frames(dist, matched_q, best_offset) < SPECIFIC_MIN:
+        return None  # alike at every offset: a shared set or template, not a copy
+    valid_query = int(q.ok.sum())
     start, end = int(matched_q.min()), int(matched_q.max())
     return Segment(
         kind="video_mirrored" if mirrored else "video",
@@ -278,16 +375,29 @@ def _video_segment(
     )
 
 
-def match_video(
-    query: list[FrameHash | None], ref: list[FrameHash | None], step: float
+def _video_segment(
+    query: list[FrameHash | None], ref: list[FrameHash | None], step: float, mirrored: bool
 ) -> Segment | None:
-    direct = _video_segment(query, ref, step, mirrored=False)
-    flipped = _video_segment(query, ref, step, mirrored=True)
+    if mirrored:
+        query = [mirror_hash(h) if h is not None else None for h in query]
+    return _segment(hash_arrays(query), hash_arrays(ref), step, mirrored)
+
+
+def _best_video(pq: PreparedQuery, ref: HashArrays, step: float) -> Segment | None:
+    direct = _segment(pq.direct, ref, step, mirrored=False)
+    flipped = _segment(pq.mirrored, ref, step, mirrored=True)
     if flipped is not None and (
         direct is None or (flipped.coverage, flipped.score) > (direct.coverage, direct.score)
     ):
         return flipped
     return direct
+
+
+def match_video(
+    query: list[FrameHash | None], ref: list[FrameHash | None], step: float
+) -> Segment | None:
+    pq = prepare(Fingerprint(duration_seconds=0.0, sha256="", frame_hashes=query))
+    return _best_video(pq, hash_arrays(ref), step)
 
 
 def _informative(values: np.ndarray) -> np.ndarray:
@@ -394,8 +504,27 @@ def match_audio(query: list[int], ref: list[int], step: float = AUDIO_STEP) -> S
 
 def compare(query: Fingerprint, ref: Fingerprint) -> dict[str, Any] | None:
     """Summarise how ``query`` overlaps ``ref``; None when nothing meaningful matches."""
-    video = match_video(query.frame_hashes, ref.frame_hashes, query.frame_step)
+    return compare_prepared(prepare(query), ref, prefilter=False)
+
+
+def compare_prepared(
+    pq: PreparedQuery,
+    ref: Fingerprint,
+    *,
+    ref_arrays: HashArrays | None = None,
+    prefilter: bool = True,
+) -> dict[str, Any] | None:
+    """Like :func:`compare` for a query prepared once and compared with many entries."""
+    query = pq.fp
+    arrays = ref_arrays if ref_arrays is not None else hash_arrays(ref.frame_hashes)
+    video = None
+    if not prefilter or video_may_match(pq, arrays):
+        video = _best_video(pq, arrays, query.frame_step)
     audio = match_audio(query.audio_fp, ref.audio_fp, query.audio_step)
+    return _summary(video, audio)
+
+
+def _summary(video: Segment | None, audio: Segment | None) -> dict[str, Any] | None:
     if video is None and audio is None:
         return None
     if video is not None and audio is not None and _same_offset(video, audio):
@@ -441,28 +570,32 @@ def _same_offset(video: Segment, audio: Segment, tolerance: float = 1.5) -> bool
 
 
 def thumbnail_hash(image: Path) -> FrameHash | None:
-    """Hash of a still image (e.g. a YouTube thumbnail), on the same grid as frames."""
-    proc = subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-nostdin",
-            "-loglevel",
-            "error",
-            "-i",
-            str(image),
-            "-vf",
-            f"scale={_GRID_W}:{_GRID_H}:flags=area,format=gray",
-            "-frames:v",
-            "1",
-            "-f",
-            "rawvideo",
-            "-",
-        ],
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
+    """Hash of a still image (e.g. a YouTube thumbnail), on the same grid as frames.
+
+    None for blank images and for anything that is not a JPEG, PNG or WebP file."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                *input_args(image, IMAGE_DEMUXERS),
+                "-vf",
+                f"scale={_GRID_W}:{_GRID_H}:flags=area,format=gray",
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (MediaError, subprocess.TimeoutExpired):
+        return None
     if proc.returncode != 0 or len(proc.stdout) < _GRID_W * _GRID_H:
         return None
     return frame_hashes_from_raw(proc.stdout)[0]

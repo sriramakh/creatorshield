@@ -142,11 +142,39 @@ def test_password_hash_runs_off_event_loop_and_attempts_are_bounded(monkeypatch)
     monkeypatch.setattr(auth, "valid_credentials", check)
 
     async def run():
-        verifier = auth.CredentialVerifier("agency", "hash")
-        for i in range(20):
-            assert not await verifier.verify(str(i))
+        verifier = auth.CredentialVerifier("agency", "hash", per_client=10, global_limit=15)
+        for i in range(10):
+            assert not await verifier.verify(str(i), "198.51.100.1")
+        # One client hitting its limit does not lock anybody else out...
         with pytest.raises(auth.AuthBusy):
-            await verifier.verify("another")
+            await verifier.verify("another", "198.51.100.1")
+        for i in range(5):
+            assert not await verifier.verify(f"b{i}", "198.51.100.2")
+        # ...until the global backstop is reached.
+        with pytest.raises(auth.AuthBusy):
+            await verifier.verify("c", "198.51.100.3")
+
+    asyncio.run(run())
+
+
+def test_per_client_limit_resets_after_a_minute(monkeypatch):
+    import asyncio
+
+    import app.auth as auth
+
+    now = [1000.0]
+    monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(auth, "valid_credentials", lambda header, *a: header == "good")
+
+    async def run():
+        verifier = auth.CredentialVerifier("agency", "hash", per_client=2, global_limit=100)
+        assert not await verifier.verify("x1", "attacker")
+        assert not await verifier.verify("x2", "attacker")
+        with pytest.raises(auth.AuthBusy):
+            await verifier.verify("x3", "attacker")
+        assert await verifier.verify("good", "operator")
+        now[0] += 61
+        assert not await verifier.verify("x4", "attacker")
 
     asyncio.run(run())
 
@@ -176,7 +204,7 @@ def test_hash_concurrency_is_bounded_and_cached_login_survives_limit(monkeypatch
     monkeypatch.setattr(auth, "valid_credentials", check)
 
     async def run():
-        verifier = auth.CredentialVerifier("agency", "hash")
+        verifier = auth.CredentialVerifier("agency", "hash", slot_wait_seconds=0.05)
         assert await verifier.verify("good")
         pending = [asyncio.create_task(verifier.verify(str(i))) for i in range(2)]
         try:
@@ -236,3 +264,30 @@ def test_active_session_keeps_its_cache_entry(monkeypatch):
         assert len(calls) == 2
 
     asyncio.run(run())
+
+
+def test_client_address_trusts_forwarded_for_only_from_trusted_proxies():
+    from starlette.requests import Request
+
+    from app.auth import client_address, parse_trusted_proxies
+
+    def request(peer, xff=None):
+        headers = [(b"x-forwarded-for", xff.encode())] if xff else []
+        return Request({"type": "http", "client": (peer, 1234), "headers": headers})
+
+    trusted = parse_trusted_proxies(["172.16.0.0/12"])
+    # From the gateway: the entry the gateway appended (rightmost) is the client.
+    assert client_address(request("172.18.0.5", "6.6.6.6, 203.0.113.9"), trusted) == "203.0.113.9"
+    # Not from a trusted proxy: a spoofed header is ignored.
+    assert client_address(request("203.0.113.7", "1.2.3.4"), trusted) == "203.0.113.7"
+    assert client_address(request("172.18.0.5", "garbage"), trusted) == "172.18.0.5"
+    assert client_address(request("172.18.0.5", "1.2.3.4"), []) == "172.18.0.5"
+    with pytest.raises(RuntimeError):
+        parse_trusted_proxies(["not-a-network"])
+
+
+def test_require_login_fails_closed_outside_production():
+    with pytest.raises(RuntimeError, match="REQUIRE_LOGIN"):
+        install_auth(FastAPI(), Settings(_env_file=None, app_env="development", require_login=True))
+    # Development without the flag stays open (local single-user use).
+    install_auth(FastAPI(), Settings(_env_file=None, app_env="development"))

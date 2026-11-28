@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app import markets as market_registry
+from app.platforms import PLATFORM_NAMES
 from app.reports.sections import section_for
 from app.schemas import AnalysisOut
 
@@ -18,7 +21,6 @@ _env = Environment(
     lstrip_blocks=True,
 )
 
-PLATFORM_NAMES = {"youtube_shorts": "YouTube Shorts", "instagram_reels": "Instagram Reels"}
 LANGUAGE_NAMES = {"en": "English", "hi": "Hindi"}
 TYPE_LABELS = {
     "observed_evidence": "Observed evidence",
@@ -35,7 +37,21 @@ def fmt_time(seconds: float | None) -> str:
     return f"{int(m)}:{s:04.1f}"
 
 
+def safe_href(url: object) -> str | None:
+    """The URL if it is an absolute http(s) link, else None (no javascript:, data: ...)."""
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        return None
+    return url.strip()
+
+
 _env.filters["ts"] = fmt_time
+_env.filters["safe_href"] = safe_href
 
 
 def render_html(analysis: AnalysisOut) -> str:
@@ -56,6 +72,12 @@ def render_html(analysis: AnalysisOut) -> str:
         generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         actionable=actionable,
         community=[f for f in actionable if f.report_section == "community"],
+        brief=[f for f in actionable if f.report_section == "brief"],
+        market_names=[
+            f"{market_registry.MARKETS[m].label} ({market_registry.MARKETS[m].regulator})"
+            for m in analysis.markets
+            if m in market_registry.MARKETS
+        ],
         disclosure=[f for f in actionable if f.report_section == "disclosure"],
         other=[f for f in actionable if f.report_section == "other"],
         cannot_check=[f for f in analysis.findings if f.finding_type == "cannot_check"],

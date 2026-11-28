@@ -28,15 +28,40 @@ Basic authentication intentionally has no application session or logout button. 
 Before customer use, test real HTTPS browser login, uploads, report/video/proof downloads, OAuth callbacks and credential rotation. Verify unauthenticated requests return 401, cross-site writes return 403, and a second agency's credentials fail. Validate separate database/volume identities and backups. The automated authentication checks do not substitute for this deployment test. Other audit blockers (rights accuracy, retention, evaluation) remain separate work.
 
 
-Authentication verifies uncached headers in worker threads (at most two concurrently),
-with at most 20 uncached attempts per minute per API process. Excess attempts return 429.
-Concurrent requests carrying the same uncached header share one verification, so a page
-load after the cache lapses does not exhaust the limit. Successful headers are cached
-until five minutes without use, with at most 128 HMAC keys in memory;
-raw headers and passwords are not cached. Caches are local to each application instance
-and are cleared on restart/credential rotation. Failed credentials are never cached.
-This bounds hashing work but does not replace hosting-edge request limits. During an
-attack, new logins may be throttled while already cached credentials continue to work.
+Authentication verifies uncached headers in worker threads (at most two concurrently).
+Uncached attempts are limited per client (`AUTH_ATTEMPTS_PER_CLIENT_PER_MINUTE`, default
+10) and in total per API process (`AUTH_ATTEMPTS_GLOBAL_PER_MINUTE`, default 120);
+excess attempts return 429. The client is the address the gateway saw: the compose files
+set `TRUSTED_PROXIES` to the private Docker ranges so the API reads the gateway's
+`X-Forwarded-For` (Caddy replaces any value sent by the client). One anonymous client
+therefore cannot lock out the operator; many clients at once can still reach the global
+backstop. Concurrent requests carrying the same uncached header share one verification,
+so a page load after the cache lapses does not exhaust the limit. Successful headers are
+cached until five minutes without use, with at most 128 HMAC keys in memory; raw headers
+and passwords are not cached. Caches are local to each application instance and are
+cleared on restart/credential rotation. Failed credentials are never cached. Caddy has
+no request rate limiter without plugins (e.g. `caddy-ratelimit`); use a firewall or an
+edge service for request-level limits.
+
+Gateway and operations (both compose files):
+
+- `request_body max_size` (`MAX_REQUEST_BODY`, default 5121MB) refuses oversized uploads at
+  the gateway; the API also refuses them while they arrive (413) and spools uploads on the
+  media volume (`UPLOAD_TMP_DIR`), never the container's root disk. Keep `MAX_REQUEST_BODY`
+  at `MAX_UPLOAD_MB` + 1 MB.
+- Security headers for every response: HSTS (HTTPS gateway only), nosniff,
+  `Referrer-Policy: same-origin`, `X-Frame-Options: DENY`, a Content-Security-Policy with
+  `frame-ancestors 'none'` (Next.js needs `script-src 'unsafe-inline'`), Permissions-Policy.
+  API responses that set their own value (the report's strict CSP) keep it.
+- Every service restarts unless stopped and has a healthcheck. The API is healthy when
+  `/api/health/ready` (database, Redis, writable storage) answers 200; this probe and
+  `/api/health/live` need no login inside the network but are still behind the gateway login.
+  The worker is healthy while it is registered in Redis (`python -m app.worker --check`).
+- Maintenance runs at worker start and every `MAINTENANCE_INTERVAL_SECONDS` (default 900)
+  in the API and worker, one run at a time (Postgres advisory lock): retention purge
+  (analyses, fingerprints, paid-lookup records), analyses stuck in `processing`/`queued`
+  after a crash reset to `failed` (Rerun works again), and stored files without a database
+  row removed after `ORPHAN_GRACE_SECONDS`.
 
 ## Single-port test instance (no domain)
 
@@ -46,7 +71,9 @@ request passes the API login via `forward_auth`. The worker is limited to 2 CPUs
 so other services on the host keep running. Without a domain there is no HTTPS, so the
 login travels unencrypted: use it for internal testing only, and `compose.pilot.yml`
 with a domain for customers. Production mode requires HTTPS, so this instance runs with
-`APP_ENV=development` and the login enabled through `PILOT_USERNAME` / `PILOT_PASSWORD_HASH`.
+`APP_ENV=development` and `REQUIRE_LOGIN=true`: API and worker refuse to start unless
+`PILOT_USERNAME` / `PILOT_PASSWORD_HASH` are set. Set `AGENCY_ID` as well to bind the
+database to one agency as in production.
 
 On the test host the instance lives in `/opt/creatorshield` (`app/` is a clone of this
 repo; `creatorshield.env` and `db_password` are root-only). `./up.sh [git ref]` fetches,

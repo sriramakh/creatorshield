@@ -114,7 +114,11 @@ def test_rejects_bad_inputs(
     fake = tmp_path / "fake.mp4"
     fake.write_bytes(b"\x00" * 2048)
     r = upload(client, fake)
-    assert r.status_code == 422 and "could not be read" in r.json()["detail"]
+    # Rejected by ffprobe (wording depends on how far probing gets).
+    assert r.status_code == 422
+    assert any(
+        s in r.json()["detail"] for s in ("could not be read", "Unsupported container format")
+    )
     r = upload(client, long_video)
     assert r.status_code == 422 and "limit is 60s" in r.json()["detail"]
     too_many = " ".join(f"#t{i}" for i in range(101))

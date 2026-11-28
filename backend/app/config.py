@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     agency_id: str | None = None
     pilot_username: str | None = None
     pilot_password_hash: SecretStr | None = None
+    # Refuse to start without PILOT_USERNAME / PILOT_PASSWORD_HASH even outside
+    # production (e.g. the plain-HTTP test instance in deploy/compose.port.yml).
+    require_login: bool = False
+    # Reverse proxies (IPs or CIDRs) whose X-Forwarded-For is trusted for the
+    # per-client login limit. Empty: the TCP peer address is the client.
+    trusted_proxies: list[str] = []
+    # Uncached login attempts (password hashes) per minute: per client, and in total.
+    auth_attempts_per_client_per_minute: int = 10
+    auth_attempts_global_per_minute: int = 120
 
     database_url: str = (
         "postgresql+psycopg://creatorshield:creatorshield_dev@localhost:5432/creatorshield"
@@ -39,12 +48,24 @@ class Settings(BaseSettings):
     queue_name: str = "creatorshield"
     # A 30-minute 4K video can spend ~15 min on its working copy alone (software decode).
     job_timeout_seconds: int = 5400
+    # Periodic maintenance (retention purge, stuck-job reset, orphaned-file sweep).
+    # Runs in the API and the worker; a Postgres advisory lock keeps runs exclusive.
+    # 0 disables the periodic loop (startup still runs it once in the worker).
+    maintenance_interval_seconds: int = 900
+    # A "processing" analysis is reset to failed after job_timeout + this grace; a
+    # "queued" one after this grace once its queue entry has disappeared.
+    stuck_job_grace_seconds: int = 600
+    # Storage directories with no database row are removed once untouched this long.
+    orphan_grace_seconds: int = 3600
 
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     # Storage
     storage_backend: Literal["local"] = "local"
     storage_dir: Path = BACKEND_DIR / "var" / "storage"
+    # Where multipart uploads are spooled while they arrive. Put it on the media
+    # volume in containers so a large upload cannot fill the container's root disk.
+    upload_tmp_dir: Path | None = None
 
     # Upload limits. 30 minutes covers 3-minute Shorts, 20-minute Reels and long cuts;
     # 5 GB fits 30 minutes of typical phone 4K. Both are configurable per deployment.
@@ -61,6 +82,12 @@ class Settings(BaseSettings):
     # Retention
     retention_hours: int = 72
     delete_media_after_analysis: bool = False
+    # Review outcomes (date, platform, verdict, counts; never content) kept for the
+    # insights page after the review itself has been deleted. 0 keeps none.
+    usage_stats_retention_days: int = 365
+
+    # Audience markets applied when a review does not choose any (IN, US, UK).
+    default_markets: list[str] = ["IN"]
 
     # Speech to text
     stt_provider: Literal["faster_whisper", "openai", "none"] = "faster_whisper"
@@ -246,6 +273,9 @@ class Settings(BaseSettings):
             )
             or self.youtube_configured,
             "paid_lookups_monthly_budget_usd": self.paid_lookups_monthly_budget_usd,
+            "catalogue_max_seconds": self.catalogue_max_seconds,
+            "default_markets": list(self.default_markets),
+            "stats_retention_days": self.usage_stats_retention_days,
         }
 
     def active_model_name(self) -> str:

@@ -18,6 +18,8 @@ from app.config import get_settings
 from app.db import get_db
 from app.media.probe import MediaError, probe, validate_extension
 from app.models import Analysis, MediaFingerprint, RightsRecord
+from app.platforms import PLATFORMS
+from app.platforms import describe as describe_platforms
 from app.provenance import budget, catalogue, evidence_pack, pipeline, youtube_search
 from app.provenance.common import LookupFailed
 from app.provenance.fingerprint import compute_fingerprint
@@ -36,7 +38,7 @@ _PROOF_TYPES = {
     b"\xff\xd8\xff": ("image/jpeg", ".jpg"),
 }
 _SPLIT = re.compile(r"[\n,]+")
-REBUILD_LIMIT = 200
+REBUILD_BATCH = 200
 
 
 # --------------------------------------------------------------------------- schemas
@@ -121,16 +123,13 @@ def _date(raw: str | None, field: str) -> date | None:
 
 
 def _rebuild_all(db: Session) -> int:
-    """Re-derive rights coverage on completed analyses after a ledger change."""
-    rows = db.scalars(
-        select(Analysis)
-        .where(Analysis.status == "completed", Analysis.provenance.is_not(None))
-        .order_by(Analysis.created_at.desc())
-        .limit(REBUILD_LIMIT)
-    ).all()
-    for analysis in rows:
-        pipeline.rebuild(db, analysis)
-    return len(rows)
+    """Re-derive rights coverage on every completed analysis after a ledger change.
+
+    Runs in batches. Analyses are also re-derived lazily when their coverage is
+    read for anything that states rights (``pipeline.ensure_current``), so a
+    request that times out part-way still leaves no stale coverage behind.
+    """
+    return pipeline.rebuild_all(db, batch_size=REBUILD_BATCH)
 
 
 def _analysis(db: Session, analysis_id: uuid.UUID) -> Analysis:
@@ -294,8 +293,8 @@ def add_to_catalogue(
 ) -> dict[str, Any]:
     """Fingerprint a past post (no AI, no paid calls) and discard the file."""
     settings = get_settings()
-    if platform and platform not in {"youtube_shorts", "instagram_reels"}:
-        raise HTTPException(422, "platform must be youtube_shorts or instagram_reels.")
+    if platform and platform not in PLATFORMS:
+        raise HTTPException(422, f"platform must be {describe_platforms(set(PLATFORMS))}.")
     try:
         ext, _ = validate_extension(file.filename or "")
     except MediaError as exc:
@@ -408,12 +407,26 @@ def recheck_rights(analysis_id: uuid.UUID, db: DB) -> dict[str, Any]:
     return {"rights": (analysis.provenance or {}).get("rights", [])}
 
 
+@router.post("/analyses/{analysis_id}/refresh-rights")
+def refresh_rights_if_stale(analysis_id: uuid.UUID, db: DB) -> dict[str, Any]:
+    """Re-derive coverage only if it is from an earlier day or an older ledger."""
+    analysis = _analysis(db, analysis_id)
+    rebuilt = pipeline.ensure_current(db, analysis)
+    return {"rebuilt": rebuilt, "rights": (analysis.provenance or {}).get("rights", [])}
+
+
 @router.get("/analyses/{analysis_id}/evidence-pack.zip")
 def evidence_pack_zip(analysis_id: uuid.UUID, db: DB) -> Response:
     from app.api.routes import serialize
 
     analysis = _analysis(db, analysis_id)
-    data = evidence_pack.build_zip(db, analysis, render_html(serialize(analysis)))
+    # The pack states rights: always re-derive coverage from today's ledger first.
+    pipeline.rebuild(db, analysis)
+    report = serialize(analysis)
+    redacted = type(report).model_validate(
+        evidence_pack.redact_report_data(analysis, report.model_dump(mode="json"))
+    )
+    data = evidence_pack.build_zip(db, analysis, render_html(redacted))
     stamp = datetime.now(UTC).strftime("%Y%m%d")
     return Response(
         data,

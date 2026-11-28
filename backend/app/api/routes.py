@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -7,15 +8,37 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from app.analysis import caption_fix, market_disclosure, outcome
+from app.analysis.brief import MAX_ITEM_CHARS as BRIEF_MAX_ITEM_CHARS
+from app.analysis.brief import MAX_ITEMS as BRIEF_MAX_ITEMS
+from app.analysis.deterministic import has_promo_signals
+from app.api.creator import (
+    available_markets,
+    available_platforms,
+    policy_refs,
+    require_platform,
+    resolve_brief,
+    resolve_markets,
+)
 from app.config import get_settings
-from app.db import get_db
-from app.jobs import delete_analysis, enqueue_analysis, get_redis, purge_expired
+from app.db import get_db, get_engine
+from app.jobs import delete_analysis, enqueue_analysis, get_redis
 from app.media.probe import MediaError, probe, validate_duration, validate_extension
 from app.models import Analysis, Finding
 from app.policies.kb import get_kb
@@ -27,7 +50,6 @@ from app.schemas import (
     AnalysisSummaryOut,
     CreateAnalysisOut,
     FindingOut,
-    PolicyRef,
     SponsorshipInput,
 )
 from app.storage import StorageError, analysis_prefix, get_storage
@@ -36,7 +58,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 DB = Annotated[Session, Depends(get_db)]
-PLATFORMS = {"youtube_shorts", "instagram_reels"}
 LANGUAGES = {"en", "hi"}
 MAX_CAPTION = 5000
 MAX_HASHTAGS = 100
@@ -55,38 +76,73 @@ def parse_hashtags(raw: str) -> list[str]:
     return tags
 
 
-def _get(db: Session, analysis_id: uuid.UUID) -> Analysis:
-    analysis = db.get(Analysis, analysis_id)
+def _get(db: Session, analysis_id: uuid.UUID, *, lock: bool = False) -> Analysis:
+    analysis = db.get(Analysis, analysis_id, with_for_update=lock)
     if analysis is None:
         raise HTTPException(404, "Analysis not found.")
     return analysis
 
 
 def serialize(analysis: Analysis) -> AnalysisOut:
-    kb = get_kb(str(get_settings().policy_kb_path))
     findings: list[FindingOut] = []
     for f in analysis.findings:
         out = FindingOut.model_validate(f)
         out.category_label = CATEGORY_LABELS.get(f.category, f.category)
         out.report_section = section_for(f.category, list(f.policy_rule_ids))
-        for rid in f.policy_rule_ids:
-            rule = kb.get(rid)
-            if rule:
-                out.policies.append(
-                    PolicyRef(
-                        id=rule.id,
-                        platform=rule.platform,
-                        title=rule.title,
-                        official_title=rule.official_title,
-                        official_url=str(rule.official_url),
-                        verified_on=rule.verified_on.isoformat(),
-                    )
-                )
+        out.policies = policy_refs(list(f.policy_rule_ids))
         findings.append(out)
     data = AnalysisOut.model_validate(analysis, from_attributes=True)
     data.findings = findings
     data.finding_count = sum(1 for f in findings if f.finding_type != "cannot_check")
+    data.markets = outcome.markets_of(analysis)
+    if analysis.status == "completed":
+        data.readiness = outcome.readiness_of(analysis)
+        data.readiness_verdict = data.readiness["verdict"]
+        data.market_disclosure = market_disclosure.assess(analysis.caption, data.markets)
+        data.caption_fix = caption_fix.suggest(
+            analysis.caption,
+            list(analysis.hashtags or []),
+            analysis.platform,
+            data.markets,
+            analysis.sponsorship,
+            promo_detected=has_promo_signals(
+                analysis.caption, list(analysis.hashtags or []), analysis.extraction or {}
+            ),
+        )
     return data
+
+
+def current(db: Session, analysis: Analysis) -> Analysis:
+    """Re-derive rights coverage before showing it, if the ledger or the date moved on."""
+    if analysis.status == "completed":
+        from app.provenance import pipeline
+
+        if pipeline.ensure_current(db, analysis):
+            db.commit()
+            db.refresh(analysis)
+    return analysis
+
+
+def _json_object(raw: str, field: str) -> dict[str, Any] | None:
+    """A JSON object sent as a multipart form field, or None when the field is empty."""
+    if not raw.strip():
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(422, f"{field} must be valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(422, f"{field} must be a JSON object.")
+    return value
+
+
+def _uuid_or_none(raw: str) -> uuid.UUID | None:
+    if not raw.strip():
+        return None
+    try:
+        return uuid.UUID(raw.strip())
+    except ValueError as exc:
+        raise HTTPException(422, "brief_id must be a UUID.") from exc
 
 
 def too_large_message(max_mb: int) -> str:
@@ -122,13 +178,67 @@ def health(db: DB) -> dict[str, Any]:
     return {
         "status": "ok" if ok else "degraded",
         "checks": checks,
-        "config": settings.public_summary(),
+        "config": public_config(),
     }
+
+
+@router.get("/health/live")
+def health_live() -> dict[str, str]:
+    """Liveness probe (no dependencies). Public so container healthchecks need no login."""
+    return {"status": "ok"}
+
+
+@router.get("/health/ready")
+def health_ready(response: Response) -> dict[str, Any]:
+    """Readiness probe: database, job queue and writable storage. 503 when not ready."""
+    settings = get_settings()
+    checks: dict[str, str] = {}
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+    if settings.use_job_queue:
+        try:
+            get_redis().ping()
+            checks["redis"] = "ok"
+        except Exception:
+            checks["redis"] = "error"
+    try:
+        root = get_storage().local_path("analyses").parent
+        root.mkdir(parents=True, exist_ok=True)
+        probe_file = root / f".ready-{uuid.uuid4().hex}"
+        probe_file.write_bytes(b"ok")
+        probe_file.unlink()
+        checks["storage"] = "ok"
+    except Exception:
+        checks["storage"] = "error"
+    ready = all(v == "ok" for v in checks.values())
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"status": "ready" if ready else "not_ready", "checks": checks}
+
+
+def public_config() -> dict[str, Any]:
+    """Non-secret configuration plus what the knowledge base makes available."""
+    summary = get_settings().public_summary()
+    summary["platforms"] = [p.public() for p in available_platforms().values()]
+    summary["markets"] = [m.public() for m in available_markets().values()]
+    summary["limits"] = {
+        "caption_max": MAX_CAPTION,
+        "hashtags_max": MAX_HASHTAGS,
+        "sponsors_max": 10,
+        "sponsor_name_max": 100,
+        "brief_items_max": BRIEF_MAX_ITEMS,
+        "brief_item_max": BRIEF_MAX_ITEM_CHARS,
+    }
+    return summary
 
 
 @router.get("/config")
 def config() -> dict[str, Any]:
-    return get_settings().public_summary()
+    return public_config()
 
 
 @router.get("/policies")
@@ -147,10 +257,12 @@ def create_analysis(
     hashtags: Annotated[str, Form()] = "",
     client_label: Annotated[str, Form(max_length=100)] = "",
     sponsorship: Annotated[str, Form(max_length=3000)] = "{}",
+    markets: Annotated[str, Form(max_length=40)] = "",
+    brief: Annotated[str, Form(max_length=20_000)] = "",
+    brief_id: Annotated[str, Form(max_length=40)] = "",
 ) -> CreateAnalysisOut:
     settings = get_settings()
-    if platform not in PLATFORMS:
-        raise HTTPException(422, "platform must be youtube_shorts or instagram_reels.")
+    require_platform(platform)
     if language not in LANGUAGES:
         raise HTTPException(422, "language must be en or hi.")
     if len(caption) > MAX_CAPTION:
@@ -164,14 +276,18 @@ def create_analysis(
         ext, content_type = validate_extension(file.filename or "")
     except MediaError as exc:
         raise HTTPException(415, str(exc)) from exc
+    chosen_markets = resolve_markets(db, [m for m in _HASHTAG_SPLIT.split(markets) if m])
+    brief_spec = resolve_brief(db, _json_object(brief, "brief"), _uuid_or_none(brief_id))
 
-    purge_expired(db)
+    # Retention runs on a schedule (app.jobs.run_maintenance), not per upload.
     analysis_id = uuid.uuid4()
     storage = get_storage()
     prefix = analysis_prefix(analysis_id)
     key = f"{prefix}/video{ext}"
     try:
         size = storage.save_stream(key, file.file, settings.max_upload_bytes)
+        # Free the spooled copy now rather than after the response.
+        file.file.close()
         info = probe(storage.local_path(key))
         validate_duration(info, settings.max_duration_seconds, settings.duration_tolerance_seconds)
     except StorageError as exc:
@@ -184,6 +300,8 @@ def create_analysis(
     analysis = Analysis(
         id=analysis_id,
         sponsorship=sponsor_context.model_dump(),
+        markets=chosen_markets,
+        brief=brief_spec.model_dump() if brief_spec else None,
         expires_at=datetime.now(UTC) + timedelta(hours=settings.retention_hours),
         platform=platform,
         language=language,
@@ -216,14 +334,21 @@ def create_analysis(
 
 
 @router.get("/analyses")
-def list_analyses(db: DB, limit: int = 50) -> list[AnalysisSummaryOut]:
+def list_analyses(
+    db: DB,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> list[AnalysisSummaryOut]:
     rows = db.scalars(
-        select(Analysis).order_by(Analysis.created_at.desc()).limit(min(limit, 200))
+        select(Analysis).order_by(Analysis.created_at.desc()).offset(offset).limit(limit)
     ).all()
     counts = dict(
         db.execute(
             select(Finding.analysis_id, func.count())
-            .where(Finding.finding_type != "cannot_check")
+            .where(
+                Finding.finding_type != "cannot_check",
+                Finding.analysis_id.in_([a.id for a in rows]),
+            )
             .group_by(Finding.analysis_id)
         ).all()
     )
@@ -237,24 +362,49 @@ def list_analyses(db: DB, limit: int = 50) -> list[AnalysisSummaryOut]:
 
 @router.get("/analyses/{analysis_id}")
 def get_analysis(analysis_id: uuid.UUID, db: DB) -> AnalysisOut:
-    return serialize(_get(db, analysis_id))
+    return serialize(current(db, _get(db, analysis_id)))
 
 
 @router.post("/analyses/{analysis_id}/rerun", status_code=status.HTTP_202_ACCEPTED)
 def rerun_analysis(analysis_id: uuid.UUID, db: DB) -> CreateAnalysisOut:
-    analysis = _get(db, analysis_id)
+    # Row lock: two reruns at once cannot both enqueue.
+    analysis = _get(db, analysis_id, lock=True)
     if analysis.status in ("queued", "processing"):
-        raise HTTPException(409, "Analysis is already running.")
-    if analysis.source == "upload" and (analysis.media_deleted or not analysis.storage_key):
-        raise HTTPException(409, "The video was deleted after analysis; upload it again.")
+        raise HTTPException(
+            409,
+            f"This analysis is already {analysis.status} (stage: {analysis.stage}, "
+            f"{analysis.progress}%). Wait for it to finish; if it stops responding it is "
+            "marked failed automatically and can be rerun then.",
+        )
     if analysis.status == "awaiting_file":
         raise HTTPException(409, "Attach the original video file before running this analysis.")
+    if analysis.source == "upload" and (analysis.media_deleted or not analysis.storage_key):
+        raise HTTPException(
+            409,
+            "The video was deleted after analysis (retention or 'delete media after "
+            "analysis'); upload it again to rerun.",
+        )
     if analysis.source != "upload" and analysis.connection_id is None:
         raise HTTPException(409, "The connected account was removed; reconnect and import again.")
+    previous = (analysis.status, analysis.stage, analysis.progress, analysis.error_message)
     analysis.status, analysis.stage, analysis.progress = "queued", "queued", 5
     analysis.error_message = None
     db.commit()
-    enqueue_analysis(str(analysis.id))
+    try:
+        enqueue_analysis(str(analysis.id))
+    except Exception as exc:
+        # Enqueue or roll back: never leave a "queued" analysis with no job behind it.
+        log.exception("failed to enqueue rerun")
+        (
+            analysis.status,
+            analysis.stage,
+            analysis.progress,
+            analysis.error_message,
+        ) = previous
+        db.commit()
+        raise HTTPException(
+            503, "Could not queue the analysis (is Redis/the worker running?). Try again."
+        ) from exc
     return CreateAnalysisOut(id=analysis.id, status="queued")
 
 
@@ -300,7 +450,17 @@ def attach_owner_file(
     except MediaError as exc:
         storage.local_path(incoming).unlink(missing_ok=True)
         raise HTTPException(422, str(exc)) from exc
+    finally:
+        file.file.close()
 
+    # Re-check under a row lock: a rerun or another attach may have started meanwhile.
+    locked = db.get(Analysis, analysis_id, with_for_update=True, populate_existing=True)
+    if locked is None or locked.status in {"queued", "processing"}:
+        storage.local_path(incoming).unlink(missing_ok=True)
+        if locked is None:
+            raise HTTPException(404, "Analysis not found.")
+        raise HTTPException(409, "Analysis is already running.")
+    analysis = locked
     final_path = storage.local_path(final)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     storage.local_path(incoming).replace(final_path)
@@ -368,7 +528,7 @@ def report_html(analysis_id: uuid.UUID, db: DB, download: bool = False) -> HTMLR
         headers["Content-Disposition"] = (
             f'attachment; filename="creatorshield-report-{analysis_id}.html"'
         )
-    return HTMLResponse(render_html(serialize(analysis)), headers=headers)
+    return HTMLResponse(render_html(serialize(current(db, analysis))), headers=headers)
 
 
 @router.get("/analyses/{analysis_id}/report.json")
@@ -377,7 +537,7 @@ def report_json(analysis_id: uuid.UUID, db: DB) -> JSONResponse:
     if analysis.status != "completed":
         raise HTTPException(409, "Report is available once the analysis has completed.")
     return JSONResponse(
-        render_json(serialize(analysis)),
+        render_json(serialize(current(db, analysis))),
         headers={
             "Content-Disposition": f'attachment; filename="creatorshield-report-{analysis_id}.json"'
         },

@@ -12,9 +12,12 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any
+from urllib.parse import urlparse
 
-from app.analysis.deterministic import PLATFORM_RULES
+from app import markets as market_registry
+from app.analysis.deterministic import rules_for
 from app.analysis.disclosure import sponsor_disclosed
+from app.platforms import is_youtube
 from app.provenance.ledger import (
     LedgerEntry,
     find_entries,
@@ -25,6 +28,9 @@ from app.schemas import FindingDraft
 
 PERMISSION_KINDS = {"creator_permission"}
 FOOTAGE_KINDS = {"footage_license", "creator_permission"}
+# Records that can cover another account's handle on screen. A brand agreement is
+# a disclosure duty, not permission to reuse the brand's or anyone else's footage.
+HANDLE_KINDS = {"creator_permission", "footage_license", "own_channel"}
 MUSIC_KINDS = {"music_license"}
 BRAND_KINDS = {"brand_agreement"}
 OWN_KINDS = {"own_channel"}
@@ -101,8 +107,14 @@ def build(
     entries: list[LedgerEntry],
     connected: set[str],
     today: date,
+    connected_review: set[str] | None = None,
+    markets: list[str] | None = None,
 ) -> tuple[list[FindingDraft], list[dict[str, Any]]]:
-    rules = PLATFORM_RULES[platform]
+    """``connected``: handles of connected accounts that belong to this post's client
+    and platform. ``connected_review``: other connected accounts (shown for review,
+    never treated as own)."""
+    rules = rules_for(platform, market_registry.clean(markets))
+    review_handles = {normalise_handle(h) for h in connected_review or set()}
     findings: list[FindingDraft] = []
     lines: list[dict[str, Any]] = []
     scope: dict[str, Any] = {"platform": platform, "client_label": client_label}
@@ -113,7 +125,7 @@ def build(
         and e.applies_to(platform, client_label)
         and e.status(today) == "active"
         for t in e.terms
-    } | connected
+    } | {normalise_handle(h) for h in connected}
     cues = provenance.get("cues") or {}
 
     # ---- handles on screen --------------------------------------------------
@@ -124,32 +136,51 @@ def build(
         if normalise_handle(handle) in own_terms:
             lines.append(_line("handle", handle, "own", "Your own account.", today=today, start=ts))
             continue
-        brand = find_entries(entries, BRAND_KINDS, handle=handle, **scope)
-        if brand:
+        status, recs = _best(find_entries(entries, HANDLE_KINDS, handle=handle, **scope), today)
+        brand = [
+            e
+            for e in find_entries(entries, BRAND_KINDS, handle=handle, **scope)
+            if e.status(today) == "active"
+        ]
+        if brand and status != "covered":
+            # The sponsor's own handle on a sponsored post is expected. Only an active
+            # agreement explains it, and it is not permission to reuse their footage.
             lines.append(
                 _line(
                     "handle",
                     handle,
                     "info",
-                    "A brand you have a recorded agreement with (see disclosure below).",
+                    "A brand you have an active recorded agreement with (see disclosure "
+                    "below). The agreement is not permission to reuse footage from this "
+                    "account; record that separately if the clip is theirs.",
                     records=brand,
                     today=today,
                     start=ts,
                 )
             )
             continue
-        status, recs = _best(
-            find_entries(entries, PERMISSION_KINDS | OWN_KINDS, handle=handle, **scope), today
-        )
         if status == "covered":
             detail = (
                 "Permission recorded in your rights ledger. Permission covers the rights, not "
                 "originality: reposted clips without significant original commentary or "
                 "editing can still be held back from recommendations"
-                + (" and, on YouTube, from monetisation." if platform == "youtube_shorts" else ".")
+                + (" and, on YouTube, from monetisation." if is_youtube(platform) else ".")
             )
             lines.append(
                 _line("handle", handle, "covered", detail, records=recs, today=today, start=ts)
+            )
+            continue
+        if normalise_handle(handle) in review_handles and status == "missing":
+            lines.append(
+                _line(
+                    "handle",
+                    handle,
+                    "review",
+                    "A connected account, but not one tied to this client and platform. "
+                    "Confirm it belongs to this client, or record a permission.",
+                    today=today,
+                    start=ts,
+                )
             )
             continue
         lines.append(
@@ -224,7 +255,7 @@ def build(
     for item in cues.get("broadcasters") or []:
         name = item["name"]
         ts = item.get("timestamp")
-        status, recs = _best(find_entries(entries, FOOTAGE_KINDS, text=name, **scope), today)
+        status, recs = _best(find_entries(entries, FOOTAGE_KINDS, name=name, **scope), today)
         if status == "covered":
             lines.append(
                 _line(
@@ -398,6 +429,16 @@ def build(
         findings_for, line = _catalogue_match(m, platform, entries, scope, rules, today)
         lines.append(line)
         findings.extend(findings_for)
+    if catalogue.get("truncated"):
+        lines.append(
+            _line(
+                "catalogue",
+                "Catalogue comparison incomplete",
+                "review",
+                str(catalogue.get("truncated_note") or "Not every catalogue entry was compared."),
+                today=today,
+            )
+        )
 
     # ---- identified music ---------------------------------------------------
     music = provenance.get("music") or {}
@@ -408,8 +449,8 @@ def build(
         song = f"“{clip.get('title')}” by {clip.get('artist')}"
         if clip.get("label"):
             song += f" ({clip['label']})"
-        text = " ".join(str(clip.get(k) or "") for k in ("artist", "title", "label", "album"))
-        status, recs = _best(find_entries(entries, MUSIC_KINDS, text=text, **scope), today)
+        fields = [str(clip.get(k) or "") for k in ("artist", "title", "label", "album")]
+        status, recs = _best(find_entries(entries, MUSIC_KINDS, names=fields, **scope), today)
         lines.append(
             _line(
                 "music",
@@ -487,13 +528,15 @@ def build(
         if not full and not partial:
             continue
         active_entries = [e for e in entries if e.status(today) == "active"]
+        # Page titles are written by whoever runs the page, so only the page's domain,
+        # matched against a domain recorded on the record, can cover it.
         covered = [
             p
             for p in full + partial
             if find_entries(
                 active_entries,
                 FOOTAGE_KINDS | OWN_KINDS,
-                text=f"{p.get('domain', '')} {p.get('title', '')}",
+                domain=str(p.get("domain") or "") or _host(p.get("url")),
                 **scope,
             )
         ]
@@ -669,7 +712,7 @@ def _catalogue_match(
         ], line("own", f"{span} repeats an earlier post ({kind_text}).")
 
     status, recs = _best(
-        find_entries(entries, PERMISSION_KINDS | FOOTAGE_KINDS, text=label, **scope), today
+        find_entries(entries, PERMISSION_KINDS | FOOTAGE_KINDS, name=label, **scope), today
     )
     if status == "covered":
         return [], line(
@@ -712,6 +755,10 @@ def _catalogue_match(
             requires_human_review=True,
         )
     ], line(status, f"{span} shows {kind_text} under a different client.", recs)
+
+
+def _host(url: Any) -> str:
+    return (urlparse(str(url or "")).hostname or "").removeprefix("www.")
 
 
 def _handles_in(text: str) -> list[str]:

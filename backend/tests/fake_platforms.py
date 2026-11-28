@@ -30,6 +30,7 @@ IG_USER_ID = "17841400000000001"
 IG_LONG_TOKEN = "IGLONG-fake-token"  # noqa: S105
 YT_ACCESS = "YTACCESS-fake-token"  # noqa: S105
 YT_REFRESH = "YTREFRESH-fake-token"  # noqa: S105
+YT_REFRESH_ROTATED = "YTREFRESH-rotated-token"  # noqa: S105
 YT_CHANNEL = "UCdemoChannel000000000001"
 
 # Mutable state inspected by tests.
@@ -209,13 +210,18 @@ def google_token(
             "scope": scope,
             "token_type": "Bearer",
         }
-    if grant_type == "refresh_token" and refresh_token == YT_REFRESH:
-        return {"access_token": YT_ACCESS, "expires_in": 3600, "scope": scope}
+    if grant_type == "refresh_token" and refresh_token in (YT_REFRESH, YT_REFRESH_ROTATED):
+        body: dict[str, Any] = {"access_token": YT_ACCESS, "expires_in": 3600, "scope": scope}
+        if STATE.get("rotate_refresh"):  # Google may issue a new refresh token
+            body["refresh_token"] = YT_REFRESH_ROTATED
+        return body
     raise HTTPException(400, {"error": "invalid_grant"})
 
 
 @app.post("/revoke")
-def google_revoke(token: str = Form(...)) -> dict[str, str]:
+def google_revoke(token: str = Form(...)) -> Any:
+    if STATE.get("revoke_fails"):
+        raise HTTPException(503, {"error": "backend_error"})
     STATE["revoked"].append(token)
     return {}
 

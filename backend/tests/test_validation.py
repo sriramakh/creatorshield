@@ -117,3 +117,50 @@ def test_embedded_instruction_flag_produces_note() -> None:
 def test_mock_findings_are_labelled() -> None:
     (f,), _ = run(finding(title="Something"), is_mock=True)
     assert f.title.startswith("[MOCK]")
+
+
+# --- Regressions from the analysis-engine review -------------------------------
+
+THUMBNAIL_EXTRACTION: dict[str, Any] = {
+    "transcript": {"segments": []},
+    "frames": [{"id": "F1", "timestamp": 0.0, "reason": "thumbnail", "file": "F1.jpg"}],
+    "ocr": [{"id": "O1", "frame_id": "F1", "timestamp": 0.0, "text": "MIRACLE CURE"}],
+}
+
+
+def _run_on(extraction: dict[str, Any], duration: float | None, *findings: AIFinding):  # type: ignore[no-untyped-def]
+    out = AIAnalysisOutput(
+        summary="s",
+        context_assessment="c",
+        findings=list(findings),
+        unassessable=[],
+        embedded_instructions_detected=False,
+    )
+    return validate_ai_output(
+        out, kb=KB, platform="instagram_reels", extraction=extraction, duration=duration
+    )
+
+
+def test_thumbnail_only_review_has_no_fake_timestamps() -> None:
+    f = finding(
+        evidence=[
+            AIEvidence(source="ocr", ref_id="O1", detail="cover text"),
+            AIEvidence(source="frame", ref_id="F1", detail="cover"),
+        ],
+        start_seconds=0.0,
+        end_seconds=3.0,
+    )
+    (v,), _ = _run_on(THUMBNAIL_EXTRACTION, None, f)
+    assert v.start_seconds is None and v.end_seconds is None
+    assert all(e["timestamp"] is None for e in v.evidence)
+
+
+def test_thumbnail_ocr_has_no_timestamp_even_when_duration_is_known() -> None:
+    f = finding(evidence=[AIEvidence(source="ocr", ref_id="O1", detail="cover text")])
+    (v,), _ = _run_on(THUMBNAIL_EXTRACTION, 30.0, f)
+    assert v.start_seconds is None and v.evidence[0]["timestamp"] is None
+
+
+def test_end_without_start_is_dropped() -> None:
+    (v,), _ = run(finding(start_seconds=None, end_seconds=4.0))
+    assert v.start_seconds is None and v.end_seconds is None

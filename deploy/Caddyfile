@@ -1,7 +1,33 @@
 {$PILOT_DOMAIN} {
+    # Uploads are capped while they arrive (MAX_UPLOAD_MB + 1 MB of form fields).
+    # The API enforces its own limit as well; keep the two in step.
+    request_body {
+        max_size {$MAX_REQUEST_BODY:5121MB}
+    }
+
+    # Every request (pages, API, downloads) is checked by the API login first.
+    # Login attempts are limited per client in the API (Caddy has no built-in rate
+    # limiter; add the caddy-ratelimit plugin or an upstream firewall for an
+    # additional request limit at the edge).
     forward_auth api:8000 {
         uri /auth/verify
     }
+
+    header {
+        defer
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # "?" sets a default: API responses that send their own value (the report's
+        # strict CSP, X-Frame-Options) keep it.
+        ?X-Content-Type-Options "nosniff"
+        ?Referrer-Policy "same-origin"
+        ?X-Frame-Options "DENY"
+        ?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+        # Next.js inlines its bootstrap scripts, so script-src needs 'unsafe-inline'.
+        # Thumbnails come from platform CDNs (https:); everything else is same-origin.
+        ?Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        -Server
+    }
+
     @api path /api/* /auth/*
     handle @api {
         reverse_proxy api:8000

@@ -22,13 +22,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app import markets as market_registry
+from app.platforms import PLATFORM_NAMES
 from app.policies.kb import PolicyKB
 
 MAX_CAPTION_CHARS = 2200
 MAX_SEGMENT_CHARS = 600
 MAX_OCR_CHARS = 400
 
-PLATFORM_NAMES = {"youtube_shorts": "YouTube Shorts", "instagram_reels": "Instagram Reels"}
 LANGUAGE_NAMES = {"en": "English", "hi": "Hindi"}
 
 
@@ -154,12 +155,14 @@ def build_prompt(
     kb: PolicyKB,
     analysis_mode: str = "full_video",
     sponsorship: dict[str, Any] | None = None,
+    markets: list[str] | None = None,
 ) -> PromptPayload:
+    markets = market_registry.clean(markets)
     boundary = secrets.token_hex(8)
     system = SYSTEM_PROMPT.replace("{boundary}", boundary)
     parts: list[TextPart | ImagePart] = []
 
-    rules = kb.rules_for_platform(platform)
+    rules = kb.rules_for_platform(platform, markets)
     kb_lines = [
         f"POLICY KNOWLEDGE BASE (version {kb.version}) for {PLATFORM_NAMES[platform]}.",
         "Each rule summarises an official policy page. Cite rules only by these IDs:",
@@ -174,6 +177,7 @@ def build_prompt(
     meta = {
         "analysis_mode": analysis_mode,
         "target_platform": PLATFORM_NAMES[platform],
+        "audience_markets": [market_registry.MARKETS[m].label for m in markets],
         "declared_language": LANGUAGE_NAMES.get(language, language),
         "duration_seconds": media_info.get("duration_seconds"),
         "resolution": f"{media_info.get('width')}x{media_info.get('height')}",
@@ -224,10 +228,16 @@ def build_prompt(
     )
 
     ocr = extraction.get("ocr") or []
+    thumbnails = {f["id"] for f in extraction.get("frames") or [] if f.get("reason") == "thumbnail"}
+
+    def _where(o: dict[str, Any]) -> str:
+        # Text on a cover thumbnail has no position in the video.
+        if o.get("frame_id") in thumbnails or o.get("timestamp") is None:
+            return f"cover thumbnail {o['frame_id']}, no timestamp"
+        return f"frame {o['frame_id']} at {o['timestamp']:.2f}s"
+
     ocr_lines = [
-        f"{o['id']} (frame {o['frame_id']} at {o['timestamp']:.2f}s): "
-        f"{_clean(o['text'], boundary, MAX_OCR_CHARS)}"
-        for o in ocr
+        f"{o['id']} ({_where(o)}): {_clean(o['text'], boundary, MAX_OCR_CHARS)}" for o in ocr
     ] or ["(no on-screen text detected)"]
     parts.append(untrusted("ON-SCREEN TEXT (OCR; may contain misreads):", "\n".join(ocr_lines)))
 

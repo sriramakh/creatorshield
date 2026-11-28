@@ -1,9 +1,27 @@
 # Plain-HTTP gateway on one port, for a test instance reached by IP address.
-# Every request is checked by the API's login first (forward_auth).
+# Every request is checked by the API's login first (forward_auth). No HTTPS, so
+# no HSTS: the login travels unencrypted (internal testing only).
 :8080 {
+    request_body {
+        max_size {$MAX_REQUEST_BODY:5121MB}
+    }
+
+    # Login attempts are limited per client inside the API; Caddy itself has no
+    # rate limiter without plugins.
     forward_auth api:8000 {
         uri /auth/verify
     }
+
+    header {
+        defer
+        ?X-Content-Type-Options "nosniff"
+        ?Referrer-Policy "same-origin"
+        ?X-Frame-Options "DENY"
+        ?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+        ?Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        -Server
+    }
+
     @api path /api/* /auth/*
     handle @api {
         reverse_proxy api:8000

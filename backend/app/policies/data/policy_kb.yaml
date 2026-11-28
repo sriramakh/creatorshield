@@ -5,17 +5,27 @@
 # says (not legal text). Platforms do not publish rule numbers, so the IDs are
 # our own stable identifiers. `quote` is a verbatim excerpt when one was captured.
 #
+# The advertising-regulator packs (platform us_advisory, uk_advisory and
+# india_advisory) are advisory. They apply only to reviews that select that
+# audience market; the tool does not decide which country's rules govern a post.
+#
 # To update: re-fetch each official_url, revise key_points, bump `version` and
 # `verified_on`. Never add a rule whose page has not been read.
-version: "2026.11.26"
+version: "2026.11.28"
 verified_on: 2026-10-21
 notes: >-
   Verified by fetching each official page on 2026-10-21, except where a rule's
   own verified_on is later. Meta transparency pages were rendered in a headless
   browser because their text is built client-side. On 2026-11-26, child safety,
   self-harm, elections misinformation, regulated goods and firearms rules were
-  added from the official pages read that day. There are no FTC or UK CAP rules
-  in this library. help.instagram.com/477434105621119 (Instagram Community
+  added from the official pages read that day. On 2026-11-28, advertising-
+  regulator packs were added for the United States (FTC), the United Kingdom
+  (ASA, CAP, CMA) and India (CCPA / Department of Consumer Affairs, SEBI) from
+  the official pages read that day; they apply only when a review selects that
+  audience market. ftc.gov serves non-browser clients an error page, so those
+  pages were read in a browser. Long pages were read in the sections the key
+  points summarise. No TikTok rules are included: tiktok.com could not be
+  reached to read them. help.instagram.com/477434105621119 (Instagram Community
   Guidelines) now redirects to Meta's Community Standards; /fraud-scams/
   redirects to /prohibited-commercial-practices/. Facebook's "Original content
   guidelines" were excluded because they apply to Facebook, not Instagram.
@@ -562,3 +572,311 @@ rules:
       - "For video without accompanying text the label must be overlaid on screen: at least 3 seconds for videos of 15 seconds or less, one-third of the duration for videos up to 2 minutes."
       - "Accepted labels include Advertisement, Ad, Sponsored, Collaboration, Partnership, Employee, Free gift and Affiliate."
       - "The 6 March 2025 addendum requires relevant qualifications for technical advice or claims about commercial health/nutrition and financial products, with prominent qualification disclosures. Unqualified influencers may share generic information that is not technical advice."
+
+  # ------------------------------------- United States (advisory, market US)
+  - id: US-FTC-DISCLOSURES-101
+    platform: us_advisory
+    category: disclosure
+    title: FTC Disclosures 101 for social media influencers
+    official_title: Disclosures 101 for Social Media Influencers
+    official_url: https://www.ftc.gov/business-guidance/resources/disclosures-101-social-media-influencers
+    verified_on: 2026-11-28
+    key_points:
+      - "Influencers must disclose any financial, employment, personal or family relationship with a brand, including free or discounted products, and making the disclosure is the influencer's own responsibility."
+      - "An endorsement in a video needs the disclosure in the video itself and not just in the description, ideally in both audio and on-screen form, and a live stream needs it repeated periodically."
+      - "Disclosures are likely to be missed if they appear only on a profile or About page, at the end of a post or video, behind a 'more' click, or mixed into a group of hashtags or links."
+      - "Terms such as 'advertisement', 'ad' and 'sponsored' are acceptable (a hashtag is optional), while 'sp', 'spon', 'collab' and stand-alone 'thanks' or 'ambassador' are called vague or confusing."
+      - "A platform's disclosure tool should not be assumed to be good enough on its own, and the disclosure should be in the same language as the endorsement."
+    quote: "If making an endorsement in a video, the disclosure should be in the video and not just in the description uploaded with the video."
+
+  - id: US-FTC-FAQ-WHEN
+    platform: us_advisory
+    category: disclosure
+    title: FTC Endorsement Guides FAQ - when a disclosure is needed
+    official_title: "FTC's Endorsement Guides: What People Are Asking"
+    official_url: https://www.ftc.gov/business-guidance/resources/ftcs-endorsement-guides-what-people-are-asking
+    verified_on: 2026-11-28
+    key_points:
+      - "A recommendation is covered when an advertiser, or someone working for it, pays the creator or gives them something of value to mention the product; a product the creator bought with no brand relationship needs no disclosure."
+      - "Free products sent with no obligation to review, loaned products and free travel or accommodation should still be disclosed because they can affect how the audience weighs the review."
+      - "Connections needing disclosure are not limited to money: family, friendship and employment relationships count, and naming an employer only on a profile page is not enough."
+      - "Each new endorsement needs its own disclosure, and a paid relationship should be disclosed even in posts the creator was not specifically paid to make."
+      - "Affiliate commissions should be disclosed clearly and close to the recommendation; 'affiliate link' by itself or a 'buy now' button is described as not adequate."
+    quote: "Each new endorsement made without a disclosure could be deceptive because viewers might not have seen the prior posts."
+
+  - id: US-FTC-FAQ-HOW
+    platform: us_advisory
+    category: disclosure
+    title: FTC Endorsement Guides FAQ - how to disclose
+    official_title: "FTC's Endorsement Guides: What People Are Asking"
+    official_url: https://www.ftc.gov/business-guidance/resources/ftcs-endorsement-guides-what-people-are-asking
+    verified_on: 2026-11-28
+    key_points:
+      - "A disclosure only in a YouTube video description is not enough on its own and a disclosure in a TikTok text description is very unlikely to be clear and conspicuous; it has the best chance of working when it is in the video itself."
+      - "If the endorsement is made visually the disclosure should be at least visual, if made audibly at least audible, and if made both ways the disclosure should be both visual and audible."
+      - "Tagging a brand, saying 'thank you', or using '#ambassador', 'partner', '#endorsement', '#client' or 'Gifted' without a brand name is not a sufficient disclosure, whereas 'Ad:', '#ad', 'Paid ad', 'Advertisement' or 'Sponsored by XYZ' at the start of a post is likely effective."
+      - "Disclosures placed in the comments, behind a hyperlink or 'more' click, only on a home or profile page, or at the end of a long post among links and other hashtags are easy to miss."
+      - "A platform's built-in paid-endorsement tool is not guaranteed to be sufficient; the FTC would look at placement, readability and clarity, and advises adding the creator's own disclosure as well."
+    quote: "To be on the safe side, it’s always best to add your own disclosure even if a platform offers its own disclosure tool."
+
+  - id: US-FTC-GUIDES-255
+    platform: us_advisory
+    category: disclosure
+    title: FTC Endorsement Guides (16 CFR Part 255) - disclosure standard and liability
+    official_title: "16 CFR Part 255 -- Guides Concerning Use of Endorsements and Testimonials in Advertising"
+    official_url: https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255
+    verified_on: 2026-11-28
+    key_points:
+      - "A 'clear and conspicuous' disclosure must be difficult to miss and easily understandable by ordinary consumers, and on social media or other interactive media it should be unavoidable."
+      - "The disclosure must match the mode of the claim: a visual claim needs a visual disclosure, an audible claim an audible one, and a claim made both ways needs both."
+      - "Material connections to disclose include payment, free or discounted products, early access, the chance of a prize or media appearance, and business, family or personal relationships, whenever a significant minority of the audience would not expect the connection."
+      - "Endorsers may be liable for statements they know or should know are deceptive, including falsely saying they personally used a product."
+      - "Advertising agencies, PR firms and similar intermediaries may be liable for disseminating ads without necessary disclosures or for hiring and directing endorsers who fail to disclose."
+    quote: "In any communication using an interactive electronic medium, such as social media or the internet, the disclosure should be unavoidable."
+
+  - id: US-FTC-GUIDES-255-TYPICALITY
+    platform: us_advisory
+    category: claims
+    title: FTC Endorsement Guides (16 CFR Part 255) - typical results in testimonials
+    official_title: "16 CFR Part 255 -- Guides Concerning Use of Endorsements and Testimonials in Advertising"
+    official_url: https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/part-255
+    verified_on: 2026-11-28
+    key_points:
+      - "A testimonial about a key product attribute is likely to be read as showing what consumers will generally achieve, so the advertiser needs substantiation for that impression."
+      - "Without such substantiation the ad should clearly and conspicuously disclose the generally expected performance in the depicted circumstances."
+      - "Disclaimers such as 'Results not typical' or 'you are not likely to have similar results' are described as insufficient to stop the testimonial conveying typical results."
+      - "A disclosure of generally expected results must not itself mislead, for example by quoting a mean inflated by outliers or results only for people who finished a programme."
+    quote: "The disclosure of the generally expected performance should be presented in a manner that does not itself misrepresent what consumers can expect."
+
+  - id: US-FTC-REVIEWS-465
+    platform: us_advisory
+    category: reviews
+    title: FTC rule on fake reviews, testimonials and fake social media influence
+    official_title: "16 CFR Part 465 -- Rule on the Use of Consumer Reviews and Testimonials"
+    official_url: https://www.ecfr.gov/current/title-16/chapter-I/subchapter-D/part-465
+    verified_on: 2026-11-28
+    key_points:
+      - "A business must not write, create or sell a consumer review, consumer testimonial or celebrity testimonial that materially misrepresents that the reviewer exists, used the product, or what their experience was."
+      - "A business must not give compensation or other incentives conditioned, expressly or by implication, on reviews expressing a particular sentiment, whether positive or negative."
+      - "An officer or manager who writes a review or testimonial about their own business must clearly and conspicuously disclose that relationship unless, for a testimonial, it is otherwise clear to the audience."
+      - "Nobody may buy or sell fake indicators of social media influence (metrics such as followers, subscribers, views or likes generated by bots or fake accounts) to misrepresent influence for a commercial purpose."
+    quote: "Purchase or procure fake indicators of social media influence that they knew or should have known to be fake and that materially misrepresent their influence or importance for a commercial purpose."
+
+  - id: US-FTC-HEALTH-CLAIMS
+    platform: us_advisory
+    category: claims
+    title: FTC health products compliance guidance - substantiating health claims
+    official_title: Health Products Compliance Guidance
+    official_url: https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance
+    verified_on: 2026-11-28
+    key_points:
+      - "Claims about the health benefits or safety of foods, supplements, drugs and other health-related products require competent and reliable scientific evidence."
+      - "As a general matter that substantiation needs to be randomized, controlled human clinical testing."
+      - "Consumer anecdotes and testimonials are never sufficient substantiation, and an honest testimonial still needs scientific evidence that the product works for buyers as it did for the endorser."
+      - "The guidance counts social media and influencer marketing as advertising, and a marketer is liable for an unsupported health claim made by a blogger it pays, whose post must also clearly disclose the payment."
+      - "Adding the DSHEA 'not evaluated by FDA' disclaimer or a similar statement does not cure an otherwise deceptive ad."
+    quote: "Anecdotal evidence about the individual experiences of consumers, including surveys of consumer experiences, are never sufficient to substantiate claims about the effects of a health product."
+
+  - id: US-FTC-EARNINGS-MLM
+    platform: us_advisory
+    category: claims
+    title: FTC guidance on earnings and lifestyle claims (multi-level marketing)
+    official_title: Business Guidance Concerning Multi-Level Marketing
+    official_url: https://www.ftc.gov/business-guidance/resources/business-guidance-concerning-multi-level-marketing
+    verified_on: 2026-11-28
+    key_points:
+      - "An MLM or participant making income claims must have a reasonable basis when the claim is made, meaning reliable empirical evidence rather than subjective beliefs or personal anecdotes."
+      - "Words or images presenting a wealthy lifestyle, such as houses, automobiles and luxury vacations, are implied earnings claims and are deceptive if participants generally do not achieve such results."
+      - "It is deceptive to promote what participants may be paid without also disclosing the typical expenses they incur and the typical amount of those expenses."
+      - "A refund or buyback policy is not a defense for making deceptive income or lifestyle claims."
+    quote: "A “reasonable basis” means reliable, empirical evidence that supports the claim, not subjective beliefs or personal anecdotes."
+
+  - id: US-FTC-KIDS-BLURRED-ADS
+    platform: us_advisory
+    category: disclosure
+    title: FTC staff recommendations on blurred advertising to children
+    official_title: "Sharpening the focus on blurred advertising aimed at kids: Staff Perspective suggests a comprehensive approach"
+    official_url: https://www.ftc.gov/business-guidance/blog/2023/09/sharpening-focus-blurred-advertising-aimed-kids-staff-perspective-suggests-comprehensive-approach
+    verified_on: 2026-11-28
+    key_points:
+      - "FTC staff say businesses, platforms and social media influencers who promote products to children online all share responsibility for keeping the line between advertising and entertainment clear."
+      - "Kids' entertainment and educational content should be clearly separated from advertising, with formatting and visual and verbal cues signalling that an ad is coming."
+      - "Disclosures should be given when the product is introduced and conveyed both orally and visually; fleeting superimposed text and fine print are described as not sufficing."
+      - "The FTC says it may take enforcement action when blurred advertising is an unfair or deceptive practice under the FTC Act."
+    quote: "Disclosures should be provided when the product is introduced and should be conveyed orally and visually to explain the commercial nature and intent of the message."
+
+  # ------------------------------------ United Kingdom (advisory, market UK)
+  - id: UK-ASA-RECOGNISING-ADS
+    platform: uk_advisory
+    category: disclosure
+    title: ASA advice on recognising ads in influencer marketing
+    official_title: "Recognising ads: Social media and influencer marketing"
+    official_url: https://www.asa.org.uk/advice-online/recognising-ads-social-media.html
+    verified_on: 2026-11-28
+    key_points:
+      - "Content featuring a brand must be obviously identifiable as advertising whenever the influencer received a payment or any incentive (requested or unsolicited) or is personally or commercially connected to the brand."
+      - "The ASA is likely to expect, at a minimum, a prominent 'Ad' label upfront that is noticed before the viewer clicks on, engages with or watches the content, on any device."
+      - "On YouTube and similar platforms the video title and/or thumbnail will likely need an identifier such as 'Ad', and Instagram or TikTok video should make its commercial intent clear before click-through or immediately from the outset."
+      - "'Sponsored', 'sp', 'spon', 'aff', 'affiliate', 'Gifted', 'Supported by', 'In association with', '#BrandAmbassador', a brand @-mention or tag, and a discount code on its own are advised against or unlikely to be sufficient."
+      - "Relying on the bio or previous posts, placing the label after 'See more' or burying it in hashtags is not sufficient, and a platform 'Paid partnership' tool should be supplemented with an 'Ad' label if it is not upfront, clear and prominent."
+    quote: "The audience should be able to recognise immediately when content is advertising, without having to click or otherwise interact with it, and they shouldn’t need any special knowledge or have to figure it out."
+
+  - id: UK-ASA-INFLUENCER-GUIDE
+    platform: uk_advisory
+    category: disclosure
+    title: ASA/CAP and CMA influencers' guide - labels and placement (October 2026 edition)
+    official_title: Influencers' guide to making clear that ads are ads
+    official_url: https://www.asa.org.uk/static/17cf70a4-f904-4684-a68c8310ba7700e1/Influencers-guide-to-making-clear-that-ads-are-ads.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "Recommended labels are #Ad, #Advert, #Advertising, #Advertisement and #AdvertisementFeature, and the '#' is not necessary if the label is prominent and separate from other content."
+      - "Labels advised against include Gift/Gifted, Affiliate/Aff, Collab, PR/PRHaul, 'Supported by', 'In partnership with', 'Thanks to [brand]', brandambassador, just tagging the brand, and Sponsorship/Sponsored/Spon/Sp."
+      - "The disclosure should be at the very beginning of the advertising content (start of the post text, title, thumbnail or on the image) and not behind 'more', among many hashtags, below a scroll, or part-way through a video."
+      - "'Payment' covers money, free products, services, trips, event invites, loans, exclusive discounts and commission even with no obligation to post, plus ownership, employment and family or friend ties, and disclosure is expected for 12 months after a relationship ends."
+      - "Each story in a series and each reposted format must be labelled individually, and ad breaks inside longer editorial content must be labelled at the specific advertising sections."
+    quote: "The disclosure should be at the very beginning of the advertising content – whether that’s the start of the post text, a title or thumbnail or on an image – whatever people see first."
+
+  - id: UK-CAP-CODE-S2
+    platform: uk_advisory
+    category: disclosure
+    title: CAP Code section 2 - recognition of marketing communications
+    official_title: 02 Recognition of marketing communications
+    official_url: https://www.asa.org.uk/type/non_broadcast/code_section/02.html
+    verified_on: 2026-11-28
+    key_points:
+      - "Rule 2.1 requires marketing communications to be obviously identifiable as such."
+      - "Rule 2.3 says marketing must not falsely claim or imply that the marketer is acting as a consumer, and must make its commercial intent clear if that is not apparent from the context."
+      - "Rule 2.4 requires marketers and publishers to make clear that advertorials are marketing communications, for example by heading them 'advertisement feature'."
+      - "Rules 2.3 and 2.4 are stated to reflect prohibited practices from Schedule 20 of the DMCCA."
+    quote: "Marketing communications must be obviously identifiable as such."
+
+  - id: UK-CMA-HIDDEN-ADS
+    platform: uk_advisory
+    category: disclosure
+    title: CMA guidance for content creators on hidden ads
+    official_title: "Social media endorsements: guidance for content creators"
+    official_url: https://www.gov.uk/government/publications/social-media-endorsements-guidance-for-content-creators/social-media-endorsements-being-transparent-with-your-followers
+    verified_on: 2026-11-28
+    key_points:
+      - "Any incentive counts as payment - money, commission, discounts, free or favourable loans or leases, and gifts including unrequested freebies - whatever the follower count, and posts about a brand owned by the creator, their family or friends must also be labelled as ads."
+      - "Labels to use are 'ad', 'advert', 'AD', 'advertising' or 'advertisement', and a platform tool such as 'paid partnership' may be used only if its label is clear and easy to see, otherwise #Ad should be added in a clear, upfront position."
+      - "Terms to avoid include #gift, #gifted, #aff, #affiliate, #collab, #spon, #sponsored, #PRTrip, 'Funded by', 'In association with', 'thank you' and just naming the brand."
+      - "It must be immediately clear that content is an ad without scrolling, selecting a link for more, visiting the profile or bio, or knowing earlier posts, and for videos and podcasts the disclosure must be given at the beginning of the ad."
+      - "Each carousel item or sequenced post containing promotional messaging must be labelled, and content must not make false or unsupported statements or exaggerate results with a filter."
+    quote: "It is not enough just to tag a brand in your post, use discount codes or affiliate links."
+
+  - id: UK-ASA-AFFILIATE
+    platform: uk_advisory
+    category: disclosure
+    title: ASA advice on online affiliate marketing
+    official_title: Online Affiliate Marketing
+    official_url: https://www.asa.org.uk/advice-online/affiliate-marketing.html
+    verified_on: 2026-11-28
+    key_points:
+      - "Affiliate links or codes that earn commission make the related content advertising, and both the business and the affiliate are responsible under the CAP Code."
+      - "Where a vlog is wholly about affiliate-linked products its commercial nature should be clear before engagement, for instance with an identifier such as 'Ad' in the title and/or thumbnail."
+      - "Social media posts that include affiliate-linked products should be obviously identifiable as advertising upfront, and where only some products are affiliate-linked it must be obvious which links and content are advertising."
+      - "The ASA has ruled the stand-alone label '*affiliate' and the label '#collab' insufficient, and a disclaimer at the bottom of a post is unlikely to be sufficient."
+    quote: "Any social media posts which include affiliate linked products/services/brands, including those posted by influencers, should be obviously identifiable as advertising upfront"
+
+  - id: UK-ASA-BEFORE-AFTER
+    platform: uk_advisory
+    category: claims
+    title: ASA advice on before-and-after photos
+    official_title: Before and after photos
+    official_url: https://www.asa.org.uk/advice-online/before-and-after-photos.html
+    verified_on: 2026-11-28
+    key_points:
+      - "Before-and-after photos are treated like testimonials, so marketers should hold signed and dated proof that they are genuine and have not been manipulated."
+      - "The photos must not exaggerate the product's efficacy and the marketer needs evidence substantiating the impression the images create."
+      - "Before-and-after imagery of a prescription-only medicine such as Botox is very likely to be seen as an implied ad for it, and such medicines may not be advertised to the public."
+      - "Slimming or health claims for slimming teas, food supplements and similar products need to be authorised even when only implied through before-and-after imagery."
+    quote: "The photos should not exaggerate the efficacy of the product and marketers need to ensure that they have relevant evidence to substantiate the impression created by the images."
+
+  - id: UK-ASA-FILTERS
+    platform: uk_advisory
+    category: claims
+    title: ASA advice on filters and production techniques in beauty ads
+    official_title: "Beauty and Cosmetics: The use of production techniques"
+    official_url: https://www.asa.org.uk/advice-online/cosmetics-the-use-of-production-techniques.html
+    verified_on: 2026-11-28
+    key_points:
+      - "Advertised claims, including visual claims, must not misleadingly exaggerate the effect a product can achieve, whether through styling, retouching or filters."
+      - "The ASA found two influencer Instagram Stories for tanning products misleading because the filters used altered skin colour and so were directly relevant to what the product was meant to do."
+      - "Filters are not inherently a problem in ads, but an applied filter must not be likely to mislead about the efficacy of the product or service."
+      - "Before-and-after images are treated as objective claims, and the 'after' image should represent what consumers can generally obtain from the product."
+    quote: "Whilst the use of filters in ads is not inherently problematic, marketers should be aware of the overall impression and final context of their ads, and ensure that any applied filters are not likely to mislead potential customers as to the efficacy of the product or service."
+
+  - id: UK-CAP-AGE-RESTRICTED
+    platform: uk_advisory
+    category: regulated_goods
+    title: CAP guidance on age-restricted ads online (alcohol, gambling, HFSS, vaping)
+    official_title: Age-restricted ads online Advertising Guidance (non-broadcast)
+    official_url: https://www.asa.org.uk/static/cb81888b-1fc6-4de2-90a52aad57872f2b/Age-restricted-ads-online-guidance-0925.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "Ads for alcohol, most gambling, e-cigarettes, tobacco, cosmetic interventions and weight loss services must not target under-18s, and ads for HFSS foods, medicines and some forms of gaming must not target under-16s."
+      - "Under the 25% rule such ads must not appear where over 25% of the audience is in the protected age group, and a paid-for influencer post is assessed on that account's followers and/or subscribers."
+      - "Age-restricted posts on brand-owned or influencer social media accounts must also comply, and marketers are told to avoid creators with strong youth appeal or unverified audience demographics."
+      - "Marketers keep primary responsibility for appropriate targeting, but influencers and others involved in preparing or publishing the ad must also abide by the Code."
+    quote: "Ads must not appear where over 25% of the audience is within the protected age group."
+
+  # ------------------------------------------- India, added 2026-11-28 (market IN)
+  - id: IN-CCPA-ENDORSE
+    platform: india_advisory
+    category: disclosure
+    title: Department of Consumer Affairs 'Endorsements Know-hows' (India)
+    official_title: "Know-hows! Endorsements For Celebrities, Influencers & Virtual Influencers on Social Media Platforms"
+    official_url: https://consumeraffairs.gov.in/public/upload/admin/cmsfiles/whatsnews/Know-hows_Endorsements_For_CelebritiesInfluencers__Virtual_Influencers_on_Social_Media_Platforms_whatsnews.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "Celebrities, influencers and virtual influencers must disclose a material connection with an advertiser, which includes money, free products (even unsolicited), discounts, gifts, trips or hotel stays, media barters, awards, and family, personal or employment relationships."
+      - "For a video the disclosure must be placed in the video and not just in the description, in both audio and video format, and for a live stream it must be displayed continuously and prominently during the entire stream."
+      - "Disclosures must be clear, prominent and extremely hard to miss, must not be mixed with a group of hashtags or links, and for a picture should be superimposed over the image."
+      - "The terms allowed are 'advertisement' or 'ad', 'sponsored', and 'paid promotion' or 'paid', and the disclosure should be in the same language as the endorsement."
+      - "A separate disclosure must be made apart from any platform disclosure tool, and endorsers are advised to satisfy themselves that the advertiser can substantiate its claims."
+    quote: "Disclosures should be placed in the video and not just in the description."
+
+  - id: IN-CCPA-MISLEADING-ADS
+    platform: india_advisory
+    category: claims
+    title: CCPA Guidelines on misleading advertisements and endorsements, 2022 (India)
+    official_title: "Guidelines for Prevention of Misleading Advertisements and Endorsements for Misleading Advertisements, 2022"
+    official_url: https://ccpa.doca.gov.in/files/CCPA_Notification.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "An endorsement must reflect the genuine, reasonably current opinion of the endorser and be based on adequate information about, or experience with, the product."
+      - "A connection between the endorser and the advertiser that might materially affect the endorsement's credibility and is not reasonably expected by the audience must be fully disclosed."
+      - "A disclaimer must not contradict the main claim, hide material information or try to correct a misleading claim, and must be in the same language and font as the claim."
+      - "If a claim is presented as a voice-over, the disclaimer must be displayed in sync with the voice-over and at the same speed."
+      - "Ads that target or use children must not exaggerate product features, take advantage of children's inexperience, or directly exhort children to buy or to persuade their parents to buy."
+    quote: "such connection shall be fully disclosed in making the endorsement."
+
+  - id: IN-CCPA-HEALTH-INFLUENCER
+    platform: india_advisory
+    category: claims
+    title: Additional guidelines for health and wellness influencers (India)
+    official_title: "Additional Influencer Guidelines for Health and Wellness Celebrities, Influencers and Virtual Influencers"
+    official_url: https://consumeraffairs.gov.in/public/upload/admin/cmsfiles/whatsnews/Additional_Influencer_Guidelines_For_Health_and_Wellness_CelebritiesInfluencers_and_Virtual_Influencers_whatsnews.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "Certified medical practitioners and health or fitness experts must disclose that they are certified when sharing health information, promoting products or making health-related claims."
+      - "Influencers who present themselves as health experts or medical practitioners must give a clear disclaimer when making health claims, for example about disease prevention, treatment or cure, immunity boosting or nutraceuticals."
+      - "Promotions of health and wellness products must carry a disclaimer that the content is not a substitute for professional medical advice, diagnosis or treatment, and encourage viewers to consult healthcare professionals."
+      - "General wellness and health advice that is not tied to specific products or services and does not target specific health conditions or outcomes is exempt."
+      - "Endorsers must not promote a health product in a way that implies its use for diagnosing, curing or preventing a disease or condition whose advertising is prohibited by law."
+    quote: "their content should not be seen as a substitute for professional medical advice, diagnosis or treatment."
+
+  - id: IN-SEBI-FINFLUENCER
+    platform: india_advisory
+    category: claims
+    title: SEBI bar on regulated entities associating with unregistered securities advisers (India)
+    official_title: Association of persons regulated by the Board and their agents with certain persons
+    official_url: https://www.sebi.gov.in/sebi_data/attachdocs/oct-2024/1729594417893.pdf
+    verified_on: 2026-11-28
+    key_points:
+      - "SEBI-regulated persons and their agents must not have any direct or indirect association with a person who gives advice or recommendations about securities unless that person is registered with or otherwise permitted by SEBI."
+      - "The same bar applies to association with anyone who makes an express or implied claim of returns or performance about securities without SEBI's permission."
+      - "A person engaged only in investor education is excluded, provided they do not give such advice or make such return or performance claims."
+      - "Association through a SEBI 'specified digital platform' is exempt, and regulated entities were told to terminate existing contracts with such persons within three months of 22 October 2024."
+    quote: "makes any claim, of returns or performance expressly or impliedly, in respect of or related to a security or securities, unless the person has been permitted by the Board to make such a claim."

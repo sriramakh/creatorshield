@@ -7,7 +7,9 @@ client - a sign that at least one of them may not own it.
 
 from __future__ import annotations
 
+import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,11 +18,21 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import Analysis, MediaFingerprint, PlatformConnection
-from app.provenance.fingerprint import Fingerprint, compare
+from app.provenance.fingerprint import (
+    AUDIO_MIN_ITEMS,
+    VIDEO_MIN_ALIGNED,
+    Fingerprint,
+    compare_prepared,
+    prepare,
+)
 from app.provenance.ledger import normalise
 
 UNLABELLED = "Unlabelled uploads"
 MIN_MATCH_SECONDS = 3.0
+COMPARE_SECONDS_MAX = 600.0
+# Upper bound on query x reference frame pairs per video (about 115 comparisons
+# of two 30-minute videos). With the time budget it keeps one review bounded.
+MAX_PAIR_WORK = 1_500_000_000
 
 
 def owner_label_for(db: Session, analysis: Analysis) -> str:
@@ -78,8 +90,25 @@ def as_fingerprint(row: MediaFingerprint) -> Fingerprint:
     )
 
 
+def compare_budget_seconds(settings: Settings) -> float:
+    """Wall-clock budget for comparing one video with the catalogue.
+
+    Kept well inside the job timeout so the rest of the review still runs.
+    """
+    configured = getattr(settings, "catalogue_compare_seconds", None)
+    if configured:
+        return float(configured)
+    return max(30.0, min(COMPARE_SECONDS_MAX, settings.job_timeout_seconds * 0.15))
+
+
 def find_matches(
-    db: Session, fp: Fingerprint, owner_label: str, exclude_id: uuid.UUID | None, settings: Settings
+    db: Session,
+    fp: Fingerprint,
+    owner_label: str,
+    exclude_id: uuid.UUID | None,
+    settings: Settings,
+    *,
+    clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     rows = db.scalars(
         select(MediaFingerprint)
@@ -89,6 +118,12 @@ def find_matches(
     ).all()
     matches = []
     me = normalise(owner_label)
+    pq = prepare(fp)
+    deadline = clock() + compare_budget_seconds(settings)
+    query_frames = max(1, len(fp.frame_hashes))
+    work = 0
+    compared = 0
+    truncated_note = None
     for row in rows:
         if exclude_id is not None and row.id == exclude_id:
             continue
@@ -106,7 +141,19 @@ def find_matches(
                 "audio_segment": None,
             }
         else:
-            result = compare(fp, as_fingerprint(row))
+            if clock() > deadline or work > MAX_PAIR_WORK:
+                truncated_note = (
+                    f"Compared with {compared} of {len(rows)} catalogue entries (newest first); "
+                    "the rest were skipped to keep the review within its time limit. "
+                    "Identical files were still checked."
+                )
+                continue
+            if not _could_match(fp, row):
+                compared += 1
+                continue
+            work += query_frames * max(1, len(row.frame_hashes or []))
+            compared += 1
+            result = compare_prepared(pq, as_fingerprint(row))
         if result is None:
             continue
         span = result["query_end"] - result["query_start"]
@@ -137,7 +184,27 @@ def find_matches(
             -max(m["video_coverage"], m["audio_coverage"]),
         )
     )
-    return {"entries_checked": len(rows), "owner_label": owner_label, "matches": matches[:20]}
+    out: dict[str, Any] = {
+        "entries_checked": len(rows),
+        "entries_compared": compared,
+        "owner_label": owner_label,
+        "matches": matches[:20],
+    }
+    if truncated_note:
+        out["truncated"] = True
+        out["truncated_note"] = truncated_note
+    return out
+
+
+def _could_match(fp: Fingerprint, row: MediaFingerprint) -> bool:
+    """Entries too short or too blank to reach the match floor are not compared."""
+    min_frames = VIDEO_MIN_ALIGNED
+    has_video = (
+        sum(1 for h in fp.frame_hashes if h) >= min_frames
+        and sum(1 for h in row.frame_hashes or [] if h) >= min_frames
+    )
+    has_audio = len(fp.audio_fp) >= AUDIO_MIN_ITEMS and len(row.audio_fp or []) >= AUDIO_MIN_ITEMS
+    return has_video or has_audio
 
 
 def purge_expired(db: Session, now: datetime | None = None) -> int:

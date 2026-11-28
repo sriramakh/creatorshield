@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import Settings
-from app.integrations.common import IntegrationError, raise_for_platform
+from app.integrations.common import IntegrationError, raise_for_platform, send
 
 PLATFORM = "Instagram"
 SCOPES = ["instagram_business_basic"]
@@ -61,7 +61,10 @@ class InstagramClient:
     def exchange_code(self, code: str) -> TokenResult:
         code = code.split("#")[0].strip()  # Instagram appends "#_" to the code
         short = raise_for_platform(
-            self.http.post(
+            send(
+                self.http,
+                PLATFORM,
+                "POST",
                 self.s.instagram_token_url,
                 data={
                     "client_id": self.s.instagram_app_id,
@@ -73,7 +76,8 @@ class InstagramClient:
             ),
             PLATFORM,
         )
-        record = short["data"][0] if isinstance(short.get("data"), list) else short
+        data = short.get("data")
+        record = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else short
         short_token = record.get("access_token")
         if not short_token:
             raise IntegrationError("Instagram did not return an access token.", 502)
@@ -81,7 +85,10 @@ class InstagramClient:
         scopes = perms.split(",") if isinstance(perms, str) else list(perms)
 
         long = raise_for_platform(
-            self.http.get(
+            send(
+                self.http,
+                PLATFORM,
+                "GET",
                 f"{self.s.instagram_graph_url.rstrip('/')}/access_token",
                 params={
                     "grant_type": "ig_exchange_token",
@@ -91,8 +98,10 @@ class InstagramClient:
             ),
             PLATFORM,
         )
+        if not long.get("access_token"):
+            raise IntegrationError("Instagram did not return a long-lived access token.", 502)
         return TokenResult(
-            access_token=long["access_token"],
+            access_token=str(long["access_token"]),
             user_id=str(record.get("user_id", "")),
             expires_at=_expiry(long.get("expires_in")),
             scopes=scopes,
@@ -100,18 +109,26 @@ class InstagramClient:
 
     def refresh(self, access_token: str) -> TokenResult:
         body = raise_for_platform(
-            self.http.get(
+            send(
+                self.http,
+                PLATFORM,
+                "GET",
                 f"{self.s.instagram_graph_url.rstrip('/')}/refresh_access_token",
                 params={"grant_type": "ig_refresh_token", "access_token": access_token},
             ),
             PLATFORM,
         )
-        return TokenResult(body["access_token"], "", _expiry(body.get("expires_in")), SCOPES)
+        if not body.get("access_token"):
+            raise IntegrationError("Instagram did not return a refreshed access token.", 502)
+        return TokenResult(str(body["access_token"]), "", _expiry(body.get("expires_in")), SCOPES)
 
     # ---------------------------------------------------------------- data
     def profile(self, access_token: str) -> dict[str, Any]:
         return raise_for_platform(
-            self.http.get(
+            send(
+                self.http,
+                PLATFORM,
+                "GET",
                 self._graph("me"),
                 params={"fields": "id,user_id,username,account_type", "access_token": access_token},
             ),
@@ -125,7 +142,8 @@ class InstagramClient:
         if after:
             params["after"] = after
         body = raise_for_platform(
-            self.http.get(self._graph(f"{ig_user_id}/media"), params=params), PLATFORM
+            send(self.http, PLATFORM, "GET", self._graph(f"{ig_user_id}/media"), params=params),
+            PLATFORM,
         )
         items = body.get("data") or []
         paging = body.get("paging") or {}
@@ -152,8 +170,12 @@ class InstagramClient:
     def media(self, media_id: str, access_token: str) -> dict[str, Any]:
         """Fresh media details (CDN media_url values expire, so fetch right before download)."""
         return raise_for_platform(
-            self.http.get(
-                self._graph(media_id), params={"fields": MEDIA_FIELDS, "access_token": access_token}
+            send(
+                self.http,
+                PLATFORM,
+                "GET",
+                self._graph(media_id),
+                params={"fields": MEDIA_FIELDS, "access_token": access_token},
             ),
             PLATFORM,
         )

@@ -22,7 +22,19 @@ class OcrResult:
 
 def ocr_image(image: Path, language: str, tesseract_cmd: str = "tesseract") -> tuple[str, float]:
     """Return (text, mean word confidence 0-100). Low-confidence words are dropped."""
-    proc = subprocess.run(
+    try:
+        proc = _run_tesseract(image, language, tesseract_cmd)
+    except subprocess.TimeoutExpired:
+        return "", 0.0
+    if proc.returncode != 0:
+        return "", 0.0
+    return _parse_tsv(proc.stdout)
+
+
+def _run_tesseract(
+    image: Path, language: str, tesseract_cmd: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             tesseract_cmd,
             str(image),
@@ -35,14 +47,17 @@ def ocr_image(image: Path, language: str, tesseract_cmd: str = "tesseract") -> t
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
         check=False,
     )
-    if proc.returncode != 0:
-        return "", 0.0
+
+
+def _parse_tsv(stdout: str) -> tuple[str, float]:
     words: list[str] = []
     confs: list[float] = []
-    reader = csv.DictReader(io.StringIO(proc.stdout), delimiter="\t", quoting=csv.QUOTE_NONE)
+    reader = csv.DictReader(io.StringIO(stdout), delimiter="\t", quoting=csv.QUOTE_NONE)
     for row in reader:
         text = (row.get("text") or "").strip()
         try:

@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+{# Also locks down copies saved to disk or shipped in the evidence pack, which are
+   opened without the HTTP Content-Security-Policy header. #}
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CreatorShield compliance report — {{ a.id }}</title>
 <style>
@@ -97,7 +100,18 @@
   </div>
   <p class="note">The risk indicator is a heuristic summary of the findings below. It is not a probability of removal, demonetization, strikes or account suspension.</p>
 
-  <p class="note">Language: {{ language_name }}{% if a.source_url %} · Post: <a href="{{ a.source_url }}">{{ a.source_url }}</a>{% endif %}</p>
+  {% set source_href = a.source_url|safe_href %}
+  <p class="note">Language: {{ language_name }}{% if source_href %} · Post: <a href="{{ source_href }}" rel="noopener noreferrer">{{ source_href }}</a>{% elif a.source_url %} · Post: {{ a.source_url }}{% endif %}</p>
+  {% if market_names %}<p class="note">Advertising guidance applied: {{ market_names|join(", ") }}. Advisory; the tool does not decide which country's rules govern a post.</p>{% endif %}
+
+  {% if a.readiness %}
+  <h2 id="readiness">Before you post: {{ a.readiness.headline }}</h2>
+  <table><tr><th>Check</th><th>Result</th><th>Detail</th></tr>
+  {% for c in a.readiness.checklist %}<tr><td>{{ c.label }}</td><td><strong>{{ {"pass": "No issue found", "warn": "Review", "fail": "Fix first", "unknown": "Not checked"}[c.status] }}</strong></td><td>{{ c.detail }}</td></tr>{% endfor %}
+  </table>
+  <p class="note">A summary of the findings below. "No issue found" means these checks found nothing to fix; it is not an approval or a clearance.</p>
+  {% endif %}
+
   {% if a.summary %}<h2>Summary</h2><p class="summary">{{ a.summary }}</p>{% endif %}
   {% if a.context_assessment %}<p><strong>Context:</strong> {{ a.context_assessment }}</p>{% endif %}
 
@@ -121,9 +135,10 @@
     {% endif %}
     {% if f.context_exception %}<div class="label">Context consideration</div><div>{{ f.context_exception }}</div>{% endif %}
     <div class="label">Suggested fix</div><div>{{ f.suggested_action }}</div>
-    <div class="label">Policy reference</div>
-    {% if f.policies %}
-    <ul class="ev">{% for p in f.policies %}<li><code>{{ p.id }}</code> {{ p.title }} — <a href="{{ p.official_url }}">{{ p.official_title }}</a> <span class="note">(verified {{ p.verified_on }})</span></li>{% endfor %}</ul>
+    {% if f.category != "brand_brief" %}<div class="label">Policy reference</div>{% endif %}
+    {% if f.category == "brand_brief" %}
+    {% elif f.policies %}
+    <ul class="ev">{% for p in f.policies %}<li><code>{{ p.id }}</code> {{ p.title }} — {% set policy_href = p.official_url|string|safe_href %}{% if policy_href %}<a href="{{ policy_href }}" rel="noopener noreferrer">{{ p.official_title }}</a>{% else %}{{ p.official_title }}{% endif %} <span class="note">(verified {{ p.verified_on }})</span></li>{% endfor %}</ul>
     {% else %}<div class="note">No verified policy reference attached — advisory only.</div>{% endif %}
     {% if f.rights_note %}<div class="note">{{ f.rights_note }}</div>{% endif %}
     {% if f.validation_notes %}<div class="note">Validation: {{ f.validation_notes|join(" ") }}</div>{% endif %}
@@ -131,7 +146,7 @@
   {% endmacro %}
 
   <h2 id="community-guidelines">Community guidelines ({{ community|length }})</h2>
-  <p class="note">Risk flags for content that may lead to a strike, removal, an age restriction, reduced distribution or loss of monetisation under YouTube's Community Guidelines or Instagram and Meta's Community Standards. A flag is a signal to review, not a legal conclusion and not a prediction of enforcement. The check reads the transcript, on-screen text, caption and hashtags. It does not classify imagery.</p>
+  <p class="note">Risk flags for content that may lead to a strike, removal, an age restriction, reduced distribution or loss of monetisation under the platform's community guidelines. A flag is a signal to review, not a legal conclusion and not a prediction of enforcement. The check reads the transcript, on-screen text, caption and hashtags. It does not classify imagery.</p>
   {% if not community %}<p>No community-guideline risk flags in the text that was checked. This is not a clearance.</p>{% endif %}
   {% for f in community %}{{ finding_card(f, type_labels) }}{% endfor %}
 
@@ -139,6 +154,27 @@
   <p class="note">Paid-promotion and sponsorship signals. These checks do not confirm the platform's paid-promotion setting.</p>
   {% if not disclosure %}<p>No sponsorship-disclosure issue was flagged in the text that was checked. This is not a clearance.</p>{% endif %}
   {% for f in disclosure %}{{ finding_card(f, type_labels) }}{% endfor %}
+  {% if a.market_disclosure and a.market_disclosure.labels %}
+  <table><tr><th>Label in the caption</th><th>Clear for</th><th>Not treated as clear for</th></tr>
+  {% for l in a.market_disclosure.labels %}<tr><td>{{ l.text }}{% if l.denied %} (denied, not a disclosure){% endif %}{% if not l.opening %} (not at the start){% endif %}</td><td>{{ l.clear_in|join(", ") or "—" }}</td><td>{{ l.unclear_in|join(", ") or "—" }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  {% if a.caption_fix and a.caption_fix.needed %}
+  <div class="finding info"><h3>Suggested caption</h3>
+    <div>{{ a.caption_fix.suggested_caption }}</div>
+    <ul class="ev">{% for c in a.caption_fix.changes %}<li>{{ c }}</li>{% endfor %}</ul>
+    <div class="note">{{ a.caption_fix.note }}</div>
+  </div>
+  {% endif %}
+
+  {% if a.brief_check %}
+  <h2 id="brand-brief">Brand brief{% if a.brief_check.brand %}: {{ a.brief_check.brand }}{% endif %} ({{ a.brief_check.met }} of {{ a.brief_check.total }} met)</h2>
+  <p class="note">Your own record of what the sponsor asked for, compared with the caption, hashtags, speech and on-screen text. A contract check, not a policy check; it is not counted in the risk indicator.{% if a.brief_check.scope != "video" %} The video itself was not read, so lines that must be said in the video are marked not checked.{% endif %}</p>
+  <table><tr><th>Requirement</th><th>What</th><th>Result</th></tr>
+  {% for i in a.brief_check["items"] %}<tr><td>{{ {"must_say": "Must say", "must_not_say": "Must not say", "required_hashtag": "Required hashtag", "required_mention": "Required mention", "competitor": "Competitor not to name", "required_disclosure": "Required disclosure"}[i.kind] }}</td><td>{{ i.text }}</td><td><strong>{{ {"met": "Met", "missing": "Not found", "violated": "Found", "unverified": "Not checked"}[i.status] }}</strong></td></tr>{% endfor %}
+  </table>
+  {% for f in brief %}{{ finding_card(f, type_labels) }}{% endfor %}
+  {% endif %}
 
   {% if other %}
   <h2>Other findings ({{ other|length }})</h2>

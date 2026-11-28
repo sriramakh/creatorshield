@@ -7,6 +7,7 @@ policy page (``official_url``) with the date we last verified its content.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -15,7 +16,18 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
-RulePlatform = Literal["youtube", "instagram", "meta_all", "india_advisory"]
+from app import markets as market_registry
+from app.platforms import PLATFORMS
+
+RulePlatform = Literal[
+    "youtube",
+    "instagram",
+    "meta_all",
+    "tiktok",
+    "india_advisory",
+    "us_advisory",
+    "uk_advisory",
+]
 
 OFFICIAL_HOSTS = {
     "support.google.com",
@@ -25,13 +37,25 @@ OFFICIAL_HOSTS = {
     "about.fb.com",
     "www.ascionline.in",
     "ascionline.in",
+    # Advertising regulators (market packs)
+    "www.ftc.gov",
+    "www.ecfr.gov",
+    "www.asa.org.uk",
+    "www.gov.uk",
+    "consumeraffairs.gov.in",
+    "ccpa.doca.gov.in",
+    "www.sebi.gov.in",
+    # TikTok (no rules are loaded until its policy pages have been read)
+    "www.tiktok.com",
+    "support.tiktok.com",
 }
 
-# Which knowledge-base platforms apply to each target platform.
-TARGET_PLATFORMS: dict[str, set[str]] = {
-    "youtube_shorts": {"youtube", "india_advisory"},
-    "instagram_reels": {"instagram", "meta_all", "india_advisory"},
-}
+
+def kb_platforms_for(
+    target: str, markets: Iterable[str] = market_registry.DEFAULT_MARKETS
+) -> set[str]:
+    """Knowledge-base platforms that apply to a target platform and its audience markets."""
+    return set(PLATFORMS[target].kb_platforms) | market_registry.kb_platforms(markets)
 
 
 class PolicyRule(BaseModel):
@@ -48,6 +72,8 @@ class PolicyRule(BaseModel):
     @field_validator("official_url")
     @classmethod
     def _official_host(cls, v: HttpUrl) -> HttpUrl:
+        if v.scheme != "https":
+            raise ValueError(f"{v} must use https")
         if v.host not in OFFICIAL_HOSTS:
             raise ValueError(f"{v} is not an official platform policy domain")
         return v
@@ -70,13 +96,27 @@ class PolicyKB(BaseModel):
     def get(self, rule_id: str) -> PolicyRule | None:
         return next((r for r in self.rules if r.id == rule_id), None)
 
-    def rules_for_platform(self, target: str) -> list[PolicyRule]:
-        allowed = TARGET_PLATFORMS[target]
+    def rules_for_platform(
+        self, target: str, markets: Iterable[str] = market_registry.DEFAULT_MARKETS
+    ) -> list[PolicyRule]:
+        allowed = kb_platforms_for(target, markets)
         return [r for r in self.rules if r.platform in allowed]
 
-    def applies(self, rule_id: str, target: str) -> bool:
+    def applies(
+        self,
+        rule_id: str,
+        target: str,
+        markets: Iterable[str] = market_registry.DEFAULT_MARKETS,
+    ) -> bool:
         rule = self.get(rule_id)
-        return rule is not None and rule.platform in TARGET_PLATFORMS[target]
+        return rule is not None and rule.platform in kb_platforms_for(target, markets)
+
+    def platforms_present(self) -> set[str]:
+        return {r.platform for r in self.rules}
+
+    def existing(self, rule_ids: Iterable[str]) -> list[str]:
+        """The given rule IDs that are in this knowledge base, in order."""
+        return [r for r in rule_ids if self.get(r) is not None]
 
 
 def load_kb(path: Path) -> PolicyKB:

@@ -156,8 +156,8 @@ def test_packs_cite_only_rules_that_exist_for_the_platform() -> None:
     from app.analysis.community_guidelines import PACKS
 
     kb = load_kb(get_settings().policy_kb_path)
-    assert kb.version == "2026.11.26"
-    assert len(kb.rules) == 42
+    assert kb.version == "2026.11.28"
+    assert len([r for r in kb.rules if r.platform in {"youtube", "instagram", "meta_all"}]) == 41
     for rule_id in (
         "YT-CG-CHILD",
         "YT-CG-ELECTIONS",
@@ -289,3 +289,86 @@ def test_report_splits_community_guidelines_from_disclosure() -> None:
     assert "https://support.google.com/youtube/answer/2801973" in html
     assert "Other findings" in html
     assert "does not classify imagery" in html
+
+
+# --- Regressions from the analysis-engine review -------------------------------
+
+
+def test_innocent_child_wording_is_not_critical() -> None:
+    assert _flags("youtube_shorts", ["My kids are my only fans haha"]) == []
+    bath = _flags("youtube_shorts", ["my kid ran around the house naked after bath time"])
+    flag = _titled(bath, "minor")
+    # Still surfaced for a person to judge, but not as an automatic critical.
+    assert flag.severity == "medium" and flag.confidence == "low"
+    assert flag.requires_human_review
+    from app.analysis.risk import compute_risk
+
+    assert compute_risk(bath)[1] in {"low", "moderate"}
+
+
+def test_explicit_child_sexual_wording_stays_critical() -> None:
+    for line in [
+        "child porn links in bio",
+        "kid porn",
+        "underage nudes for sale",
+        "nude photos of a child",
+        "sexy little girl dancing",
+        "sexy kids compilation",
+        "my kid has an onlyfans account",
+        "onlyfans account for 15 year olds",
+    ]:
+        flag = _titled(_flags("instagram_reels", [line]), "minor")
+        assert flag.severity == "critical" and flag.confidence == "high", line
+
+
+def test_everyday_wording_is_not_a_risk_flag() -> None:
+    assert (
+        _flags(
+            "youtube_shorts",
+            [
+                "Buying Top Gun Maverick on blu-ray",
+                "Guns N Roses tickets for sale",
+                "buying a nerf gun for my nephew",
+                "buy a bottle of white wine for this risotto",
+                "Don’t kill yourself over this exam, take a break",
+            ],
+        )
+        == []
+    )
+
+
+def test_gaming_talk_is_lowered_not_dropped() -> None:
+    threat = _titled(_flags("youtube_shorts", ["I'm gonna kill you in this round lol"]), "threat")
+    assert threat.severity == "low"
+    hate = _titled(_flags("youtube_shorts", ["kill all the men in this level of the game"]), "hate")
+    assert hate.severity == "low"
+    # Outside a game the same wording keeps its severity.
+    assert _titled(_flags("youtube_shorts", ["I'm gonna kill you"]), "threat").severity == "high"
+
+
+def test_real_sales_still_flag() -> None:
+    assert _titled(_flags("youtube_shorts", ["Selling glock 19, dm me"]), "firearm")
+    assert _titled(_flags("youtube_shorts", ["buy whisky, dm me for delivery"]), "alcohol")
+
+
+def test_typographic_apostrophe_matches_like_ascii() -> None:
+    assert _titled(_flags("youtube_shorts", ["you should kill yourself"]), "suicide")
+    assert _flags("youtube_shorts", ["Please don’t ever kill yourself"]) == []
+
+
+def test_thumbnail_ocr_profanity_is_not_escalated_as_early() -> None:
+    out = run_deterministic_checks(
+        "instagram_reels",
+        "",
+        [],
+        {
+            "transcript": {"segments": []},
+            "frames": [{"id": "F1", "timestamp": 0.0, "reason": "thumbnail", "file": "F1.jpg"}],
+            "ocr": [{"id": "O1", "frame_id": "F1", "timestamp": 0.0, "text": "what the fuck"}],
+        },
+        0.0,
+        analysis_mode="caption_thumbnail",
+    )
+    flag = _titled([f for f in out if f.category == "community_guidelines"], "strong language")
+    assert flag.severity == "low"
+    assert flag.start_seconds is None and flag.evidence[0]["timestamp"] is None

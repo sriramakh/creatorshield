@@ -13,8 +13,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analysis import outcome
 from app.analysis.risk import compute_risk
 from app.config import Settings
 from app.media.probe import MediaError
@@ -23,7 +25,12 @@ from app.provenance import catalogue, cues, music, web, youtube_search
 from app.provenance.common import LookupFailed
 from app.provenance.findings import build
 from app.provenance.fingerprint import compute_fingerprint
-from app.provenance.ledger import connected_handles, load_entries
+from app.provenance.ledger import (
+    ConnectedAccounts,
+    connected_accounts_for,
+    ledger_digest,
+    load_entries,
+)
 from app.provenance.reconcile import reconcile
 from app.schemas import SEVERITY_ORDER, FindingDraft
 from app.storage import analysis_prefix, get_storage
@@ -135,11 +142,21 @@ def _cue_frame_ids(prov: dict[str, Any], ocr: list[dict[str, Any]]) -> list[str]
     return ids
 
 
+def _connected(db: Session, analysis: Analysis) -> ConnectedAccounts:
+    return connected_accounts_for(
+        db,
+        platform=analysis.platform,
+        client_label=analysis.client_label,
+        connection_id=analysis.connection_id,
+    )
+
+
 def derive(
     db: Session, analysis: Analysis, extraction: dict[str, Any] | None = None
 ) -> tuple[list[FindingDraft], dict[str, Any]]:
     """Provenance findings + the provenance dict with fresh rights-coverage lines."""
     prov = dict(analysis.provenance or {})
+    accounts = _connected(db, analysis)
     findings, lines = build(
         provenance=prov,
         platform=analysis.platform,
@@ -148,12 +165,59 @@ def derive(
         hashtags=analysis.hashtags,
         extraction=extraction if extraction is not None else (analysis.extraction or {}),
         entries=load_entries(db),
-        connected=connected_handles(db),
+        connected=accounts.own,
+        connected_review=accounts.review,
         today=date.today(),
+        markets=outcome.markets_of(analysis),
     )
     prov["rights"] = lines
     prov["rights_checked_at"] = datetime.now(UTC).isoformat()
+    prov["rights_checked_on"] = date.today().isoformat()
+    prov["ledger_digest"] = ledger_digest(db)
     return findings, prov
+
+
+def is_stale(db: Session, analysis: Analysis, digest: str | None = None) -> bool:
+    """Coverage was derived on an earlier day (records may have expired or started
+    since) or before the last change to the ledger / connected accounts."""
+    prov = analysis.provenance or {}
+    if analysis.status != "completed" or not analysis.provenance:
+        return False
+    if prov.get("rights_checked_on") != date.today().isoformat():
+        return True
+    return prov.get("ledger_digest") != (digest or ledger_digest(db))
+
+
+def ensure_current(db: Session, analysis: Analysis) -> bool:
+    """Re-derive rights coverage (pure, no paid calls) when it may be out of date.
+
+    Call before showing or exporting anything that states coverage. Returns True
+    when the analysis was rebuilt.
+    """
+    if not is_stale(db, analysis):
+        return False
+    rebuild(db, analysis)
+    return True
+
+
+def rebuild_all(db: Session, batch_size: int = 100) -> int:
+    """Re-derive every completed analysis, in batches (after a ledger change)."""
+    ids = db.scalars(
+        select(Analysis.id)
+        .where(Analysis.status == "completed", Analysis.provenance.is_not(None))
+        .order_by(Analysis.created_at.desc())
+    ).all()
+    done = 0
+    for start in range(0, len(ids), batch_size):
+        batch = db.scalars(
+            select(Analysis).where(Analysis.id.in_(ids[start : start + batch_size]))
+        ).all()
+        for analysis in batch:
+            rebuild(db, analysis)
+            done += 1
+        for analysis in batch:  # keep memory flat across batches
+            db.expunge(analysis)
+    return done
 
 
 def fold_disclosure(drafts: list[FindingDraft]) -> list[FindingDraft]:
@@ -184,6 +248,8 @@ def persist(db: Session, analysis: Analysis, drafts: list[FindingDraft]) -> None
     for i, d in enumerate(drafts):
         analysis.findings.append(Finding(sort_order=i, **d.model_dump()))
     analysis.risk_score, analysis.risk_level = compute_risk(drafts)
+    # Keep the readiness verdict and the insights row in step with the findings.
+    outcome.refresh(db, analysis)
 
 
 def rebuild(db: Session, analysis: Analysis) -> None:
@@ -258,7 +324,14 @@ def lookup_youtube(
     row = db.query(MediaFingerprint).filter(MediaFingerprint.analysis_id == analysis.id).first()
     if row is None:
         raise LookupFailed("This analysis has no video fingerprint to compare thumbnails with.")
-    block = youtube_search.search(db, query, list(row.frame_hashes or []), row.frame_step, settings)
+    block = youtube_search.search(
+        db,
+        query,
+        list(row.frame_hashes or []),
+        row.frame_step,
+        settings,
+        own_channels=_connected(db, analysis).own_channel_ids,
+    )
     prov = dict(analysis.provenance or {})
     prov["youtube"] = block
     analysis.provenance = prov

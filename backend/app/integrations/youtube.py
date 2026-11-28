@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import Settings
-from app.integrations.common import IntegrationError, raise_for_platform
+from app.integrations.common import IntegrationError, raise_for_platform, send
 
 PLATFORM = "YouTube"
 SCOPE_READONLY = "https://www.googleapis.com/auth/youtube.readonly"
@@ -63,7 +63,9 @@ class YouTubeClient:
 
     def _token_request(self, data: dict[str, str]) -> dict[str, Any]:
         data = {"client_id": self.s.google_client_id or "", "client_secret": self._secret, **data}
-        return raise_for_platform(self.http.post(self.s.google_token_url, data=data), PLATFORM)
+        return raise_for_platform(
+            send(self.http, PLATFORM, "POST", self.s.google_token_url, data=data), PLATFORM
+        )
 
     def exchange_code(self, code: str, verifier: str) -> TokenResult:
         body = self._token_request(
@@ -83,13 +85,35 @@ class YouTubeClient:
         return result
 
     def revoke(self, token: str) -> None:
-        # Revoking the refresh token also invalidates its access tokens.
-        self.http.post(self.s.google_revoke_url, data={"token": token})
+        """Revoke the grant. Revoking the refresh token also invalidates its access tokens.
+
+        Raises IntegrationError when Google does not confirm the revocation. A token
+        Google reports as already invalid ("invalid_token") counts as revoked.
+        """
+        resp = send(self.http, PLATFORM, "POST", self.s.google_revoke_url, data={"token": token})
+        if resp.is_success:
+            return
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        if (
+            resp.status_code == 400
+            and isinstance(body, dict)
+            and body.get("error") == "invalid_token"
+        ):
+            return
+        raise IntegrationError(
+            f"Google did not confirm the revocation (HTTP {resp.status_code}).", 502
+        )
 
     # ---------------------------------------------------------------- data
     def _get(self, path: str, token: str, params: dict[str, str]) -> dict[str, Any]:
         return raise_for_platform(
-            self.http.get(
+            send(
+                self.http,
+                PLATFORM,
+                "GET",
                 f"{self.s.youtube_api_url.rstrip('/')}/{path}",
                 params=params,
                 headers={"Authorization": f"Bearer {token}"},
@@ -133,7 +157,10 @@ class YouTubeClient:
         )
 
     def download_caption(self, token: str, caption_id: str) -> str:
-        resp = self.http.get(
+        resp = send(
+            self.http,
+            PLATFORM,
+            "GET",
             f"{self.s.youtube_api_url.rstrip('/')}/captions/{caption_id}",
             params={"tfmt": "srt"},
             headers={"Authorization": f"Bearer {token}"},
@@ -146,11 +173,14 @@ class YouTubeClient:
 def _token(body: dict[str, Any]) -> TokenResult:
     if not body.get("access_token"):
         raise IntegrationError("Google did not return an access token.", 502)
-    expires = body.get("expires_in")
+    try:
+        expires = int(body.get("expires_in") or 0)
+    except (TypeError, ValueError):
+        expires = 0
     return TokenResult(
-        access_token=body["access_token"],
+        access_token=str(body["access_token"]),
         refresh_token=body.get("refresh_token"),
-        expires_at=datetime.now(UTC) + timedelta(seconds=int(expires)) if expires else None,
+        expires_at=datetime.now(UTC) + timedelta(seconds=expires) if expires else None,
         scopes=str(body.get("scope", "")).split(),
     )
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -26,13 +27,14 @@ from app.integrations import youtube as yt
 from app.integrations.common import IntegrationError, get_http_client
 from app.integrations.connections import access_token, hashtags_from_text
 from app.media.ocr import ocr_frames, ocr_image
-from app.media.probe import MediaError, media_timeout, probe
+from app.media.probe import IMAGE_DEMUXERS, MediaError, input_args, media_timeout, probe
 from app.models import Analysis, PlatformConnection
 from app.storage import analysis_prefix, get_storage
 
 log = logging.getLogger(__name__)
 
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
+DOWNLOAD_MAX_SECONDS = 30 * 60.0  # whole transfer, not per read
 ALLOWED_LOCAL_TEST_HOSTS = {"127.0.0.1", "localhost"}
 
 
@@ -48,38 +50,74 @@ def host_allowed(url: str, allowed: list[str]) -> bool:
 
 
 def download(
-    http: httpx.Client, url: str, dest: Path, *, allowed: list[str], max_bytes: int, kind: str
+    http: httpx.Client,
+    url: str,
+    dest: Path,
+    *,
+    allowed: list[str],
+    max_bytes: int,
+    kind: str,
+    max_seconds: float = DOWNLOAD_MAX_SECONDS,
 ) -> int:
-    """Stream ``url`` to ``dest``. Every redirect hop is re-checked against the allow-list."""
-    for _ in range(4):
-        if not host_allowed(url, allowed):
-            raise IntegrationError("Refusing to download media from an unexpected host.", 502)
-        with http.stream("GET", url) as resp:
-            if resp.is_redirect:
-                url = urljoin(url, resp.headers.get("location", ""))
-                continue
-            if not resp.is_success:
-                raise IntegrationError(f"Media download failed ({resp.status_code}).", 502)
-            ctype = resp.headers.get("content-type", "")
-            if not ctype.startswith(kind + "/"):
-                raise IntegrationError(f"Unexpected media type from platform ({ctype}).", 502)
-            written = 0
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with dest.open("wb") as out:
-                for chunk in resp.iter_bytes(1024 * 1024):
-                    written += len(chunk)
-                    if written > max_bytes:
-                        out.close()
-                        dest.unlink(missing_ok=True)
-                        raise IntegrationError("Media file is larger than the allowed size.", 413)
-                    out.write(chunk)
-            return written
-    raise IntegrationError("Too many redirects while downloading media.", 502)
+    """Stream ``url`` to ``dest``. Every redirect hop is re-checked against the allow-list.
+
+    The size cap is enforced while streaming, the whole transfer has a deadline (a
+    slow drip cannot hold the worker), and a partial file is removed on any failure.
+    """
+    deadline = time.monotonic() + max_seconds
+    try:
+        for _ in range(4):
+            if not host_allowed(url, allowed):
+                raise IntegrationError("Refusing to download media from an unexpected host.", 502)
+            with http.stream("GET", url) as resp:
+                if resp.is_redirect:
+                    url = urljoin(url, resp.headers.get("location", ""))
+                    continue
+                if not resp.is_success:
+                    raise IntegrationError(f"Media download failed ({resp.status_code}).", 502)
+                ctype = resp.headers.get("content-type", "")
+                if not ctype.startswith(kind + "/"):
+                    raise IntegrationError(f"Unexpected media type from platform ({ctype}).", 502)
+                declared = resp.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > max_bytes:
+                    raise IntegrationError("Media file is larger than the allowed size.", 413)
+                written = 0
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with dest.open("wb") as out:
+                    for chunk in resp.iter_bytes(1024 * 1024):
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise IntegrationError(
+                                "Media file is larger than the allowed size.", 413
+                            )
+                        if time.monotonic() > deadline:
+                            raise IntegrationError("Media download took too long.", 504)
+                        out.write(chunk)
+                return written
+        raise IntegrationError("Too many redirects while downloading media.", 502)
+    except httpx.HTTPError as exc:
+        dest.unlink(missing_ok=True)
+        raise IntegrationError("The platform's media server could not be reached.", 502) from exc
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
 
 
 def trim(video: Path, seconds: float) -> None:
     tmp = video.with_name("trimmed" + video.suffix)
-    proc = subprocess.run(
+    try:
+        proc = _run_trim(video, tmp, seconds)
+    except subprocess.TimeoutExpired as exc:
+        tmp.unlink(missing_ok=True)
+        raise MediaError("Trimming the imported video took too long.") from exc
+    if proc.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise MediaError("Could not trim the imported video.")
+    tmp.replace(video)
+
+
+def _run_trim(video: Path, tmp: Path, seconds: float) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             "ffmpeg",
             "-hide_banner",
@@ -87,8 +125,7 @@ def trim(video: Path, seconds: float) -> None:
             "-loglevel",
             "error",
             "-y",
-            "-i",
-            str(video),
+            *input_args(video),
             "-t",
             f"{seconds:.2f}",
             "-c",
@@ -99,16 +136,28 @@ def trim(video: Path, seconds: float) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=media_timeout(seconds),
         check=False,
     )
-    if proc.returncode != 0 or not tmp.exists():
-        raise MediaError("Could not trim the imported video.")
-    tmp.replace(video)
 
 
 def thumbnail_to_frame(image: Path, frame: Path) -> None:
-    proc = subprocess.run(
+    """Convert a downloaded cover/thumbnail (JPEG, PNG or WebP only) to a JPEG frame."""
+    try:
+        proc = _run_thumbnail(image, frame)
+    except subprocess.TimeoutExpired as exc:
+        frame.unlink(missing_ok=True)
+        raise MediaError("Reading the post thumbnail took too long.") from exc
+    finally:
+        image.unlink(missing_ok=True)
+    if proc.returncode != 0 or not frame.exists():
+        raise MediaError("Could not read the post thumbnail.")
+
+
+def _run_thumbnail(image: Path, frame: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             "ffmpeg",
             "-hide_banner",
@@ -116,8 +165,7 @@ def thumbnail_to_frame(image: Path, frame: Path) -> None:
             "-loglevel",
             "error",
             "-y",
-            "-i",
-            str(image),
+            *input_args(image, IMAGE_DEMUXERS),
             "-frames:v",
             "1",
             "-vf",
@@ -128,12 +176,19 @@ def thumbnail_to_frame(image: Path, frame: Path) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
         check=False,
     )
-    image.unlink(missing_ok=True)
-    if proc.returncode != 0 or not frame.exists():
-        raise MediaError("Could not read the post thumbnail.")
+
+
+def _reason(exc: BaseException) -> str:
+    if isinstance(exc, IntegrationError):
+        return exc.user_message
+    if isinstance(exc, httpx.HTTPError):
+        return "the platform's media server could not be reached"
+    return str(exc)
 
 
 def prepare_owner_review(db: Session, analysis: Analysis, settings: Settings) -> dict[str, Any]:
@@ -216,8 +271,8 @@ def _instagram_snapshot(
             thumbnail_text, _confidence = ocr_image(
                 frame, analysis.language, settings.tesseract_cmd
             )
-        except (IntegrationError, MediaError) as exc:
-            warnings.append(f"The cover image could not be read: {exc}")
+        except (IntegrationError, MediaError, httpx.HTTPError) as exc:
+            warnings.append(f"The cover image could not be read: {_reason(exc)}")
         finally:
             raw.unlink(missing_ok=True)
             frame.unlink(missing_ok=True)
@@ -338,16 +393,19 @@ def _prepare_instagram(
             max_bytes=settings.max_upload_bytes,
             kind="video",
         )
-        info = probe(path)
         notes: list[str] = []
-        if (
-            info.duration_seconds
-            > settings.import_max_seconds + settings.duration_tolerance_seconds
-        ):
-            original = info.duration_seconds
-            trim(path, settings.import_max_seconds)
+        try:
             info = probe(path)
-            size = path.stat().st_size
+            original = info.duration_seconds
+            trimmed = original > settings.import_max_seconds + settings.duration_tolerance_seconds
+            if trimmed:
+                trim(path, settings.import_max_seconds)
+                info = probe(path)
+                size = path.stat().st_size
+        except MediaError:
+            path.unlink(missing_ok=True)  # never leave an unvalidated download behind
+            raise
+        if trimmed:
             notes.append(
                 f"The Reel is {original:.0f}s long; only the first "
                 f"{settings.import_max_seconds:.0f}s were analysed."
@@ -401,8 +459,9 @@ def _prepare_instagram(
                         [("F1", 0.0, frame)], analysis.language, settings.tesseract_cmd
                     )
                 ]
-        except (IntegrationError, MediaError) as exc:
-            warnings.append(f"Thumbnail could not be analysed: {exc}")
+        except (IntegrationError, MediaError, httpx.HTTPError) as exc:
+            (work / "frames" / "thumb.src").unlink(missing_ok=True)
+            warnings.append(f"Thumbnail could not be analysed: {_reason(exc)}")
     db.commit()
     return {
         "transcript": {"provider": "none", "segments": []},

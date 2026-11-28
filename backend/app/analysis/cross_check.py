@@ -11,16 +11,21 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
-from app.analysis.deterministic import PLATFORM_RULES
+from app import markets as market_registry
+from app.analysis.deterministic import rules_for
+from app.platforms import PLATFORMS
 from app.schemas import FindingDraft
 
 _MIN_TOKENS = 8
 _DURATION_FLOOR_SECONDS = 1.5
 _DURATION_RATIO = 0.08
 
+TIKTOK_SPAM_RULES: list[str] = []
+# Misleading-metadata rule per platform family.
 SPAM_RULES = {
-    "youtube_shorts": ["YT-CG-SPAM"],
-    "instagram_reels": ["META-CS-SPAM"],
+    "youtube": ["YT-CG-SPAM"],
+    "instagram": ["META-CS-SPAM"],
+    "tiktok": TIKTOK_SPAM_RULES,
 }
 
 
@@ -73,9 +78,10 @@ def build_cross_check(
     platform: str,
     snapshot: dict[str, Any],
     extraction: dict[str, Any],
+    markets: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[FindingDraft]]:
     """Return a report dict (safe to show and to pass to the model) and findings."""
-    rules = PLATFORM_RULES[platform]
+    rules = rules_for(platform, market_registry.clean(markets))
     original = float(snapshot.get("original_file_duration_seconds") or 0)
     analysed = float(snapshot.get("analysed_duration_seconds") or original)
     platform_duration = snapshot.get("platform_duration_seconds")
@@ -251,7 +257,7 @@ def build_cross_check(
                         "timestamp": None,
                     }
                 ],
-                policy_rule_ids=SPAM_RULES.get(platform, []),
+                policy_rule_ids=SPAM_RULES.get(PLATFORMS[platform].family, []),
                 requires_human_review=True,
             )
         )

@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app import markets as market_registry
 from app.policies.kb import PolicyKB
 from app.schemas import AIAnalysisOutput, FindingDraft
 
@@ -34,12 +35,18 @@ def build_evidence_index(
     }
     for s in (extraction.get("transcript") or {}).get("segments", []):
         index[s["id"]] = (s["start"], s["end"])
+    thumbnails: set[str] = set()
     for f in extraction.get("frames") or []:
         # A thumbnail is not a moment in the video, so it carries no timestamp.
-        ts = None if f.get("reason") == "thumbnail" else f["timestamp"]
-        index[f["id"]] = (ts, ts)
+        if f.get("reason") == "thumbnail":
+            thumbnails.add(f["id"])
+            index[f["id"]] = (None, None)
+        else:
+            index[f["id"]] = (f["timestamp"], f["timestamp"])
     for o in extraction.get("ocr") or []:
-        index[o["id"]] = (o["timestamp"], o["timestamp"])
+        # Nor does text read from a thumbnail.
+        ts = None if o.get("frame_id") in thumbnails else o.get("timestamp")
+        index[o["id"]] = (ts, ts)
     return index
 
 
@@ -68,6 +75,7 @@ def validate_ai_output(
     extraction: dict[str, Any],
     duration: float | None,
     is_mock: bool = False,
+    markets: list[str] | None = None,
 ) -> tuple[list[FindingDraft], list[str]]:
     """Return (validated findings, analysis-level notes)."""
     evidence_index = build_evidence_index(extraction)
@@ -80,11 +88,13 @@ def validate_ai_output(
         rule_ids: list[str] = []
         for rid in f.policy_rule_ids:
             rid = rid.strip().upper()
-            if kb.applies(rid, platform):
+            if kb.applies(rid, platform, market_registry.clean(markets)):
                 if rid not in rule_ids:
                     rule_ids.append(rid)
             elif kb.get(rid):
-                vnotes.append(f"Removed citation {rid}: it does not apply to this platform.")
+                vnotes.append(
+                    f"Removed citation {rid}: it does not apply to this platform or market."
+                )
             else:
                 vnotes.append(f"Removed unverified citation '{_trim(rid, 40)}' (not in KB).")
 
@@ -113,11 +123,16 @@ def validate_ai_output(
 
         start_s = _clamp(f.start_seconds, duration)
         end_s = _clamp(f.end_seconds, duration)
-        if start_s is None:
+        if start_s is None and duration is not None:
+            # Derived from cited evidence; with an unknown duration (thumbnail or
+            # metadata review) no timestamp can be verified, so none is shown.
             starts = [t[0] for t in times if t[0] is not None]
             ends = [t[1] for t in times if t[1] is not None]
             if starts:
-                start_s, end_s = min(starts), max(ends) if ends else None
+                start_s = _clamp(min(starts), duration)
+                end_s = _clamp(max(ends), duration) if ends else None
+        if start_s is None:
+            end_s = None  # an end without a start cannot be placed on the timeline
         if start_s is not None and end_s is not None and end_s < start_s:
             start_s, end_s = end_s, start_s
 

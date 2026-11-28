@@ -17,6 +17,50 @@ class MediaError(Exception):
     """Raised for invalid or unprocessable media. Message is safe to show users."""
 
 
+# --------------------------------------------------------------------------- safe inputs
+#
+# FFmpeg picks a demuxer by content, and some demuxers (HLS, DASH, concat, image
+# sequences...) open further files or URLs named inside the input. A playlist
+# renamed to .mp4 would make ffprobe fetch URLs or read local files. Every input
+# is therefore sniffed by its magic bytes, opened with that demuxer forced, and
+# restricted to the local file protocol.
+
+VIDEO_DEMUXERS = frozenset({"mov", "matroska"})
+IMAGE_DEMUXERS = frozenset({"jpeg_pipe", "png_pipe", "webp_pipe"})
+AUDIO_DEMUXERS = frozenset({"wav"})
+_MP4_BOXES = {b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip", b"pnot", b"uuid"}
+
+
+def sniff_container(path: Path) -> str | None:
+    """FFmpeg demuxer name for the file's real format, from its first bytes."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(16)
+    except OSError:
+        return None
+    if len(head) >= 8 and head[4:8] in _MP4_BOXES:
+        return "mov"
+    if head.startswith(bytes.fromhex("1a45dfa3")):
+        return "matroska"
+    if head.startswith(bytes.fromhex("ffd8ff")):
+        return "jpeg_pipe"
+    if head.startswith(bytes.fromhex("89504e470d0a1a0a")):
+        return "png_pipe"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "webp_pipe"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return "wav"
+    return None
+
+
+def input_args(path: Path, kinds: frozenset[str] = VIDEO_DEMUXERS) -> list[str]:
+    """``-protocol_whitelist file -f <demuxer> -i <path>`` for a sniffed, allowed format."""
+    fmt = sniff_container(path)
+    if fmt is None or fmt not in kinds:
+        raise MediaError("Unsupported or unrecognised file format.")
+    return ["-protocol_whitelist", "file", "-f", fmt, "-i", str(path)]
+
+
 @dataclass
 class MediaInfo:
     duration_seconds: float
@@ -53,12 +97,19 @@ def media_timeout(seconds: float, base: float = 120.0) -> float:
 
 
 def probe(path: Path, timeout: float = 30.0) -> MediaInfo:
+    fmt = sniff_container(path)
+    if fmt not in VIDEO_DEMUXERS:
+        raise MediaError("Unsupported container format (only MP4, MOV and WebM files).")
     try:
         proc = subprocess.run(
             [
                 "ffprobe",
                 "-v",
                 "error",
+                "-protocol_whitelist",
+                "file",
+                "-f",
+                str(fmt),
                 "-print_format",
                 "json",
                 "-show_format",
@@ -67,6 +118,8 @@ def probe(path: Path, timeout: float = 30.0) -> MediaInfo:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -74,7 +127,10 @@ def probe(path: Path, timeout: float = 30.0) -> MediaInfo:
         raise MediaError("Timed out reading the video file.") from exc
     if proc.returncode != 0:
         raise MediaError("The file could not be read as a video.")
-    data = json.loads(proc.stdout or "{}")
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise MediaError("The file could not be read as a video.") from exc
     fmt = data.get("format", {})
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)

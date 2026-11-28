@@ -8,10 +8,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-Platform = Literal["youtube_shorts", "instagram_reels"]
+Platform = Literal["youtube_shorts", "youtube_video", "instagram_reels", "tiktok"]
+Market = Literal["IN", "US", "UK"]
 Language = Literal["en", "hi"]
 
-Category = Literal[
+# Categories the AI review may use.
+AICategory = Literal[
     "community_guidelines",
     "harmful_content",  # hate, harassment, violence, sexual, dangerous
     "spam_deception",
@@ -20,6 +22,19 @@ Category = Literal[
     "originality",
     "licensing",
     "context_exception",
+]
+# brand_brief: the content against a sponsor's brief (app.analysis.brief). A
+# contract check, not a policy check, so the AI contract does not offer it.
+Category = Literal[
+    "community_guidelines",
+    "harmful_content",
+    "spam_deception",
+    "monetization",
+    "disclosure",
+    "originality",
+    "licensing",
+    "context_exception",
+    "brand_brief",
 ]
 
 CATEGORY_LABELS: dict[str, str] = {
@@ -31,6 +46,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "originality": "Reused / non-original content",
     "licensing": "Music & third-party licensing",
     "context_exception": "Context (news, education, satire, commentary)",
+    "brand_brief": "Brand brief",
 }
 
 # observed_evidence: the content itself shows the issue (quote/frame).
@@ -62,7 +78,7 @@ class AIEvidence(BaseModel):
 
 
 class AIFinding(BaseModel):
-    category: Category
+    category: AICategory
     finding_type: AIFindingType
     severity: Severity
     confidence: Confidence
@@ -159,7 +175,7 @@ class FindingOut(BaseModel):
     rights_status: str | None = None
     rights_note: str | None = None
     # Derived at serialisation. Not stored. disclosure stays separate from community flags.
-    report_section: Literal["community", "disclosure", "other"] = "other"
+    report_section: Literal["community", "disclosure", "brief", "other"] = "other"
 
 
 class AnalysisSummaryOut(BaseModel):
@@ -183,10 +199,27 @@ class AnalysisSummaryOut(BaseModel):
     analysis_mode: str = "full_video"
     source_title: str | None = None
     client_label: str | None = None
+    # Audience markets whose advertising guidance was applied.
+    markets: list[str] = Field(default_factory=list)
+    # ready | review | fix_first, once the review has completed.
+    readiness_verdict: str | None = None
+
+    @field_validator("markets", mode="before")
+    @classmethod
+    def _markets(cls, value: Any) -> Any:
+        return value or []
 
 
 class AnalysisOut(AnalysisSummaryOut):
     sponsorship: dict[str, Any] | None = None
+    # The sponsor's brief this review was checked against, and the result.
+    brief: dict[str, Any] | None = None
+    brief_check: dict[str, Any] | None = None
+    # Derived when the review is read (app.analysis.readiness / caption_fix /
+    # market_disclosure); never stored.
+    readiness: dict[str, Any] | None = None
+    caption_fix: dict[str, Any] | None = None
+    market_disclosure: dict[str, Any] | None = None
     updated_at: datetime
     source_url: str | None = None
     source_media_id: str | None = None
@@ -249,6 +282,11 @@ class SponsorshipInput(BaseModel):
 
 class ImportRequest(BaseModel):
     sponsorship: SponsorshipInput = Field(default_factory=SponsorshipInput)
+    # Audience markets (IN, US, UK). Omitted = the workspace default.
+    markets: list[str] | None = Field(default=None, max_length=3)
+    # A brief to check against: inline (BriefSpec fields) or a saved one by ID.
+    brief: dict[str, Any] | None = None
+    brief_id: uuid.UUID | None = None
     connection_id: uuid.UUID
     url: str | None = Field(default=None, max_length=500)
     media_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
@@ -256,3 +294,59 @@ class ImportRequest(BaseModel):
     client_label: str | None = Field(default=None, max_length=100)
     # Create the analysis and wait for the creator's own video file before fetching.
     attach_owner_file: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Creator tools: caption check, briefs, workspace settings
+# ---------------------------------------------------------------------------
+
+
+class QuickCheckRequest(BaseModel):
+    """A caption to check before there is a video. Nothing is stored."""
+
+    platform: Platform
+    markets: list[str] | None = Field(default=None, max_length=3)
+    caption: str = Field(default="", max_length=5000)
+    hashtags: list[str] = Field(default_factory=list, max_length=100)
+    sponsorship: SponsorshipInput = Field(default_factory=SponsorshipInput)
+    brief: dict[str, Any] | None = None
+    brief_id: uuid.UUID | None = None
+
+    @field_validator("hashtags")
+    @classmethod
+    def clean_hashtags(cls, values: list[str]) -> list[str]:
+        tags = [v.strip().lstrip("#").strip()[:100] for v in values]
+        return list(dict.fromkeys(t for t in tags if t))
+
+
+class BriefOut(BaseModel):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    name: str
+    brand: str
+    must_say: list[str]
+    must_not_say: list[str]
+    required_hashtags: list[str]
+    required_mentions: list[str]
+    competitors: list[str]
+    required_disclosure: str | None
+    notes: str
+
+
+class WorkspaceSettingsIn(BaseModel):
+    mode: Literal["creator", "agency"] | None = None
+    display_name: str | None = Field(default=None, max_length=120)
+    default_platform: Platform | None = None
+    default_markets: list[str] | None = Field(default=None, min_length=1, max_length=3)
+    default_language: Language | None = None
+    onboarded: bool | None = None
+
+
+class WorkspaceSettingsOut(BaseModel):
+    mode: Literal["creator", "agency"]
+    display_name: str
+    default_platform: str
+    default_markets: list[str]
+    default_language: str
+    onboarded: bool

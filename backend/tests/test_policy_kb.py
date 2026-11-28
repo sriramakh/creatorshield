@@ -6,7 +6,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from app.analysis.deterministic import PLATFORM_RULES
+from app import markets as market_registry
+from app.analysis.deterministic import MARKET_RULES, rules_for
 from app.config import get_settings
 from app.policies.kb import OFFICIAL_HOSTS, PolicyKB, load_kb
 
@@ -25,10 +26,22 @@ def test_kb_loads_and_every_rule_is_official_and_dated(kb: PolicyKB) -> None:
 
 
 def test_deterministic_checks_only_cite_rules_that_exist_for_the_platform(kb: PolicyKB) -> None:
-    for platform, groups in PLATFORM_RULES.items():
+    from app.api.creator import available_platforms
+
+    every_market = list(market_registry.MARKETS)
+    for platform in available_platforms():
+        for ids in rules_for(platform, every_market).values():
+            for rule_id in ids:
+                assert kb.applies(rule_id, platform, every_market), (
+                    f"{rule_id} not valid for {platform}"
+                )
+    # A market's rules are only citable when that market is selected.
+    for market, groups in MARKET_RULES.items():
+        others = [m for m in every_market if m != market]
         for ids in groups.values():
             for rule_id in ids:
-                assert kb.applies(rule_id, platform), f"{rule_id} not valid for {platform}"
+                assert kb.applies(rule_id, "youtube_shorts", [market])
+                assert not kb.applies(rule_id, "youtube_shorts", others)
 
 
 def test_platform_scoping(kb: PolicyKB) -> None:
@@ -77,5 +90,21 @@ def test_kb_rejects_duplicate_ids() -> None:
 
 
 def test_kb_file_is_plain_yaml(tmp_path: Path) -> None:
-    raw = yaml.safe_load(get_settings().policy_kb_path.read_text())
+    raw = yaml.safe_load(get_settings().policy_kb_path.read_text(encoding="utf-8"))
     assert raw["version"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://support.google.com/youtube/answer/2801973",  # not https
+        "https://support.google.com.evil.com/youtube/answer/1",  # look-alike host
+        "https://youtube.com.evil.com/policy",
+        "https://evil.com/support.google.com",
+    ],
+)
+def test_kb_requires_https_on_an_official_host(url: str) -> None:
+    with pytest.raises(ValidationError):
+        PolicyKB.model_validate(
+            {"version": "x", "verified_on": "2026-10-21", "rules": [_base_rule(official_url=url)]}
+        )

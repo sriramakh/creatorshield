@@ -7,7 +7,7 @@ import subprocess
 import wave
 from pathlib import Path
 
-from app.media.probe import MediaError, media_timeout
+from app.media.probe import AUDIO_DEMUXERS, MediaError, input_args, media_timeout
 
 _SIL_START = re.compile(r"silence_start: (-?[0-9.]+)")
 _SIL_END = re.compile(r"silence_end: ([0-9.]+)")
@@ -23,8 +23,7 @@ def extract_audio(video: Path, out: Path, timeout: float = 120.0) -> None:
             "-loglevel",
             "error",
             "-y",
-            "-i",
-            str(video),
+            *input_args(video),
             "-vn",
             "-ac",
             "1",
@@ -36,6 +35,8 @@ def extract_audio(video: Path, out: Path, timeout: float = 120.0) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -62,8 +63,7 @@ def sound_intervals(
             "ffmpeg",
             "-hide_banner",
             "-nostdin",
-            "-i",
-            str(audio),
+            *input_args(audio, AUDIO_DEMUXERS),
             "-af",
             f"silencedetect=noise={noise_db}dB:d={min_silence}",
             "-f",
@@ -72,6 +72,8 @@ def sound_intervals(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=media_timeout(duration),
         check=False,
     )

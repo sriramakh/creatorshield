@@ -12,12 +12,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+from app.analysis.textnorm import normalise
+from app.platforms import PLATFORMS
 from app.schemas import FindingDraft
 
 SeverityName = Literal["info", "low", "medium", "high", "critical"]
 ConfidenceName = Literal["low", "medium", "high"]
 
 _RANK: dict[str, int] = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_CONF_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 _DOWN: dict[SeverityName, SeverityName] = {
     "critical": "high",
     "high": "medium",
@@ -61,14 +64,46 @@ class TextSpan(Protocol):
     end: float | None
 
 
+# TikTok rule IDs per pack key; packs without an entry cite the overview rule.
+TIKTOK_PACK_RULES: dict[str, tuple[str, ...]] = {}
+TIKTOK_DEFAULT_RULES: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class Signal:
+    """One wording pattern.
+
+    ``context`` is an optional pattern for an everyday setting (a game, a recipe).
+    When it matches the same line, the hit is lowered to ``context_severity``,
+    or dropped when that is ``None``. ``confidence`` overrides the pack's
+    confidence for weak co-occurrence signals that need a person to judge them.
+    """
+
     pattern: str
     severity: SeverityName
+    context: str | None = None
+    context_severity: SeverityName | None = None
+    confidence: ConfidenceName | None = None
     regex: re.Pattern[str] = field(init=False, compare=False, repr=False)
+    context_regex: re.Pattern[str] | None = field(init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "regex", re.compile(self.pattern, re.IGNORECASE))
+        object.__setattr__(
+            self,
+            "context_regex",
+            re.compile(self.context, re.IGNORECASE) if self.context else None,
+        )
+
+    def hit(self, text: str) -> tuple[str, SeverityName] | None:
+        match = self.regex.search(text)
+        if match is None:
+            return None
+        if self.context_regex is not None and self.context_regex.search(text):
+            if self.context_severity is None:
+                return None
+            return match.group(0), self.context_severity
+        return match.group(0), self.severity
 
 
 @dataclass(frozen=True)
@@ -85,18 +120,49 @@ class Pack:
     escalate_early: bool = False
 
     def rule_ids(self, platform: str) -> tuple[str, ...]:
-        return self.youtube if platform == "youtube_shorts" else self.instagram
+        family = PLATFORMS[platform].family
+        if family == "tiktok":
+            return TIKTOK_PACK_RULES.get(self.key, TIKTOK_DEFAULT_RULES)
+        return self.youtube if family == "youtube" else self.instagram
 
 
-def _s(pattern: str, severity: SeverityName) -> Signal:
-    return Signal(pattern, severity)
+def _s(
+    pattern: str,
+    severity: SeverityName,
+    *,
+    context: str | None = None,
+    context_severity: SeverityName | None = None,
+    confidence: ConfidenceName | None = None,
+) -> Signal:
+    return Signal(pattern, severity, context, context_severity, confidence)
 
 
 # Sale verbs stay narrow so "law and order" or "in order to" do not match.
 _SALE = r"buy(?:ing)?|sell(?:ing)?|for\s+sale|dm\s+(?:me|to\s+(?:buy|order))"
+# Tools, toys and titles that are called "gun" but are not firearms.
+_NOT_FIREARM = (
+    r"(?<!water )(?<!glue )(?<!nail )(?<!staple )(?<!top )(?<!nerf )(?<!toy )(?<!spray )"
+    r"(?<!heat )(?<!massage )(?<!squirt )(?<!paint )(?<!paintball )(?<!bubble )(?<!foam )"
+    r"(?<!caulk )(?<!caulking )(?<!grease )(?<!tattoo )(?<!glitter )(?<!airsoft )"
+)
 _GUN = (
     r"(?:handguns?|firearms?|glocks?|ar-?15s?|pistols?|rifles?|"
-    r"(?<!water )(?<!glue )(?<!nail )(?<!staple )guns?)"
+    rf"{_NOT_FIREARM}guns?(?!\s+n'?\s*roses))"
+)
+_MINOR = (
+    r"(?:children|child|minors|minor|underage|preteens?|toddlers?|kids|kid|"
+    r"(?:1[0-7]|[1-9])\s*(?:yo|y/o|year[\s-]olds?))"
+)
+# Video-game talk: "I'm gonna kill you in this round", "kill all the men in this level".
+_GAMING = (
+    r"\b(?:round|level|game|gaming|gameplay|match|boss|lobby|respawn|spawn|fortnite|"
+    r"minecraft|pubg|bgmi|free\s*fire|valorant|warzone|call\s+of\s+duty|gta|roblox|"
+    r"among\s+us|squad|ranked|1v1|noob|clutch|headshot|npcs?|zombies?)\b"
+)
+# Cooking talk: "buy a bottle of white wine for this risotto".
+_COOKING = (
+    r"\b(?:recipe|cook(?:ing|ed)?|risotto|sauce|marinade|marinate|deglaze|simmer|braise|"
+    r"stew|pasta|tbsp|tablespoons?|teaspoons?|cups?\s+of|ml\s+of|batter|dough|pan)\b"
 )
 _DRUG = r"cocaine|heroin|fentanyl|meth(?:amphetamine)?|mdma|ecstasy"
 _TOBACCO = r"vapes?|vape\s+pens?|e-?cigs?|cigarettes?|cigars?"
@@ -122,19 +188,51 @@ PACKS: tuple[Pack, ...] = (
         instagram=("META-CS-CHILD",),
         downgrade=False,
         signals=(
+            # Explicit wording: critical.
             _s(r"\b(?:child\s*porn(?:ography)?|csam)\b", "critical"),
-            _s(r"\bunderage\s+(?:nude|naked|porn|sex)\b", "critical"),
+            _s(r"\bunderage\s+(?:nudes?|naked|porn|sex)\b", "critical"),
             _s(
-                r"\b(?:children|child|minors|minor|underage|preteen|toddlers|toddler|kids|kid)\b"
-                r".{0,30}\b(?:nude" + _NOT_COSMETIC + r"|naked|porn|only\s*fans)\b",
+                r"\b(?:nudes|nude\s+(?:pics?|photos?|pictures?|videos?)|"
+                r"naked\s+(?:pics?|photos?|pictures?|videos?|selfies?)|porn|"
+                r"sex\s+(?:videos?|tapes?|pics?)|sexual\s+(?:videos?|photos?|content))\s+"
+                r"(?:of|with|from|featuring)\s+(?:a\s+|an\s+|my\s+|the\s+|your\s+|some\s+)?"
+                rf"(?:young\s+|little\s+)?{_MINOR}\b",
                 "critical",
             ),
             _s(
-                r"\b(?:nude" + _NOT_COSMETIC + r"|naked|porn|only\s*fans)\b.{0,30}"
-                r"\b(?:children|child|minors|minor|underage|preteen|toddlers|toddler|kids|kid)\b",
+                r"\b(?:sexy|seductive|sexuali[sz]ed|sexuali[sz]ing)\s+(?:little\s+|young\s+)?"
+                rf"(?:{_MINOR}|schoolgirls?|schoolboys?)\b|"
+                r"\b(?:sexy|seductive)\s+little\s+(?:girls?|boys?)\b",
+                "critical",
+            ),
+            _s(
+                r"\b(?:kid|kiddie|kiddy|child|toddler|preteen|underage|minor)\s*porn\b",
+                "critical",
+            ),
+            _s(
+                rf"\b{_MINOR}\b.{{0,30}}\b(?:onlyfans|only\s+fans\s+"
+                r"(?:account|page|link|content|subscription))\b",
+                "critical",
+            ),
+            _s(
+                r"\b(?:onlyfans|only\s+fans\s+(?:account|page|link|content|subscription))\b"
+                rf".{{0,30}}\b{_MINOR}\b",
                 "critical",
             ),
             _s(r"नाबालिग.{0,40}(?:नंगा|न्यूड|सेक्स|पोर्न)", "critical"),
+            # A child word near "naked"/"nude"/"porn" is often innocent ("my kid ran
+            # around naked after bath time"). Flag it for a person to judge instead
+            # of treating it as a critical finding.
+            _s(
+                rf"\b{_MINOR}\b.{{0,30}}\b(?:nude" + _NOT_COSMETIC + r"|naked|porn)\b",
+                "medium",
+                confidence="low",
+            ),
+            _s(
+                r"\b(?:nude" + _NOT_COSMETIC + rf"|naked|porn)\b.{{0,30}}\b{_MINOR}\b",
+                "medium",
+                confidence="low",
+            ),
         ),
     ),
     Pack(
@@ -164,6 +262,8 @@ PACKS: tuple[Pack, ...] = (
                 r"(?:muslims|hindus|jews|christians|sikhs|blacks|whites|immigrants|"
                 r"gays|trans(?:\s+people)?|women|men)\b",
                 "high",
+                context=_GAMING,
+                context_severity="low",
             ),
             _s(
                 r"\b(?:they(?:'re|\s+are)|those\s+people\s+are)\s+"
@@ -193,6 +293,8 @@ PACKS: tuple[Pack, ...] = (
                 r"\b(?:i(?:'ll|\s+will)|i\s+am\s+going\s+to|i'm\s+going\s+to|gonna)\s+"
                 r"(?:kill|murder|shoot|stab)\s+(?:you|u|him|her|them)\b",
                 "high",
+                context=_GAMING,
+                context_severity="low",
             ),
             _s(r"\bi\s+know\s+where\s+you\s+live\b", "high"),
             _s(r"\b(?:doxx?(?:ing)?|swat)\s+(?:you|him|her|them)\b", "high"),
@@ -245,7 +347,12 @@ PACKS: tuple[Pack, ...] = (
         youtube=("YT-CG-SEXUAL", "YT-MON-AD-FRIENDLY"),
         instagram=("META-CS-NUDITY", "IG-RECOMMENDATIONS"),
         signals=(
-            _s(r"\bonly\s*fans\b", "medium"),
+            # "OnlyFans", but not "my kids are my only fans".
+            _s(
+                r"\bonlyfans\b|(?<!my )(?<!our )(?<!your )(?<!his )(?<!her )(?<!their )"
+                r"(?<!the )(?<!are )(?<!is )\bonly\s+fans\b",
+                "medium",
+            ),
             _s(r"\bsex\s*tapes?\b", "high"),
             _s(r"\b(?:hardcore\s+)?porn(?:ography)?\b", "high"),
             _s(r"\b(?:blow\s*jobs?|dick\s*pics?)\b", "high"),
@@ -301,7 +408,11 @@ PACKS: tuple[Pack, ...] = (
         youtube=("YT-CG-SELFHARM",),
         instagram=("META-CS-SUICIDE",),
         signals=(
-            _s(r"(?<!don't )(?<!do not )\bkill\s+yourself\b", "high"),
+            # Text is normalised first, so a typographic apostrophe reads as "don't".
+            _s(
+                r"(?<!don't )(?<!dont )(?<!do not )(?<!never )(?<!don't ever )\bkill\s+yourself\b",
+                "high",
+            ),
             _s(
                 r"\bhow\s+to\s+(?:commit\s+suicide|cut\s+(?:yourself|myself)|hide\s+(?:my\s+)?cuts)\b",
                 "critical",
@@ -388,6 +499,8 @@ PACKS: tuple[Pack, ...] = (
                 r"\b(?:for\s+sale|dm\s+(?:me|to\s+buy)|buy(?:ing)?)\b.{0,30}"
                 r"\b(?:whisky|whiskey|vodka|beer|wine|alcohol)\b",
                 "medium",
+                context=_COOKING,
+                context_severity=None,
             ),
             _s(r"\b(?:fixed\s+match(?:es)?|guaranteed\s+(?:betting\s+)?wins?)\b", "high"),
             _s(r"\b(?:casino|sportsbook)\s+(?:bonus|signup|deposit)\b", "medium"),
@@ -614,21 +727,30 @@ def run_community_guideline_checks(
     items: Sequence[TextSpan],
 ) -> list[FindingDraft]:
     """One finding per pack that matches. Hashtags are included."""
+    texts = [normalise(item.text) for item in items]
     found: dict[str, list[tuple[TextSpan, str, SeverityName]]] = {}
+    weak: dict[str, ConfidenceName] = {}
     for pack in PACKS:
         hits: list[tuple[TextSpan, str, SeverityName]] = []
-        for item in items:
-            best: tuple[str, SeverityName] | None = None
+        overrides: list[ConfidenceName | None] = []
+        for item, text in zip(items, texts, strict=True):
+            best: tuple[str, SeverityName, ConfidenceName | None] | None = None
             for signal in pack.signals:
-                match = signal.regex.search(item.text)
-                if match is None:
+                hit = signal.hit(text)
+                if hit is None:
                     continue
-                if best is None or _RANK[signal.severity] > _RANK[best[1]]:
-                    best = (match.group(0), signal.severity)
+                if best is None or _RANK[hit[1]] > _RANK[best[1]]:
+                    best = (hit[0], hit[1], signal.confidence)
             if best is not None:
                 hits.append((item, best[0], best[1]))
+                overrides.append(best[2])
         if hits:
             found[pack.key] = hits
+            # Only weak co-occurrence hits: the finding takes their (lower) confidence.
+            if all(o is not None for o in overrides):
+                weak[pack.key] = min(
+                    (o for o in overrides if o is not None), key=lambda c: _CONF_RANK[c]
+                )
 
     child_refs = {item.ref_id for item, _, _ in found.get("child_sexual", [])}
     if child_refs and "sexual" in found:
@@ -647,7 +769,7 @@ def run_community_guideline_checks(
             if early or len(matched) >= 3:
                 severity = severity if _RANK[severity] >= _RANK["medium"] else "medium"
         context: str | None = None
-        confidence: ConfidenceName = pack.confidence
+        confidence: ConfidenceName = weak.get(pack.key, pack.confidence)
         if pack.downgrade and all(_EDSA.search(item.text) for item, _, _ in matched):
             severity = _DOWN[severity]
             confidence = "low"
