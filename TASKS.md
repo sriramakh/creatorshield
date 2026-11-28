@@ -46,6 +46,19 @@ Acceptance criteria and status:
 - [ ] Live test of AudD + Google Vision with real keys (needs your authorisation + accounts)
 - [ ] Evaluation of catalogue matching on real agency footage (crops, overlays, speed changes)
 
+## Milestone 4 — hardening and creator tools ✅ (live platform, live AI and container tests pending)
+
+- [x] Review fixes: disclosure denials, child-safety false positives, everyday-wording false positives, merge and risk consistency, provider fallbacks, thumbnail timestamps
+- [x] Operations: scheduled retention, stuck-job recovery, upload size enforced while receiving, delete-while-processing cleanup, per-client login throttling, log redaction, compose hardening
+- [x] Rights: coverage re-derived on read and before evidence packs, record-type and client scoping, evidence-pack redaction, budget reservation, network fallbacks, ffmpeg input hardening
+- [x] Audience markets with FTC, ASA / CAP / CMA and Indian regulator packs (21 rules read 2026-11-28); market-aware label check
+- [x] Instant caption check, suggested caption, brand briefs, publish-readiness verdict, Overview insights, workspace settings (creator / agency), YouTube long-form target
+- [x] Frontend redesign to `frontend/DESIGN.md` (tokens, light and dark, app shell, command palette, accessible primitives)
+- [x] Windows: `scripts/dev.ps1`, test suite passes on Windows
+- [ ] TikTok rules (its policy pages must be read from a network that can reach them), then enable the target
+- [ ] Brief passed to the AI review for meaning-level checks (today: wording match only)
+- [ ] Reviewer sign-off and shareable approval links for brands
+
 ## Next (proposed priority order)
 
 1. **Security before sharing**: authentication (accounts/orgs), per-analysis authorisation, rate limits/upload quotas, HTTPS deployment

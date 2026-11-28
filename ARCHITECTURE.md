@@ -43,6 +43,12 @@ Redis ──► RQ SimpleWorker (backend/app/worker.py)
 5. AI output is validated, merged with corroborating rule findings, sorted, scored
    and persisted. The schema-valid raw AI output is kept in `analyses.ai_output` for audit.
 6. Reports: `GET …/report.html` (self-contained, printable, CSP-locked) and `…/report.json`.
+7. Maintenance (`app/jobs.py: run_maintenance`) runs at worker start and every
+   `MAINTENANCE_INTERVAL_SECONDS` in the API (asyncio task) and worker (thread), one run at
+   a time via a Postgres advisory lock: expired analyses/fingerprints/paid lookups, analyses
+   stuck in `processing`/`queued` reset to `failed`, orphaned storage swept. Jobs run through
+   `app.jobs.run_analysis_job`, which removes leftover files if the analysis was deleted
+   while it ran. Request bodies are capped while they arrive (`RequestBodyLimit` in `main.py`).
 
 ## Connected accounts & imports (`backend/app/integrations/`)
 
@@ -126,15 +132,51 @@ Matching rules worth knowing:
 
 ## Policy knowledge base
 
-`backend/app/policies/data/policy_kb.yaml` (version `2026.11.26`, 42 rules):
-YouTube (21), Meta Community Standards (13, apply to Instagram), Instagram (7),
-India/ASCI advisory (1). Each rule has a CreatorShield ID (platforms don't number
-their policies), the official URL and title, the verification date, paraphrased
-key points, and optionally a verbatim quote. The loader (Pydantic) rejects
-non-official domains and duplicate IDs. Rules are scoped per target platform.
-There are no FTC or UK CAP rules. The community-guideline check
+`backend/app/policies/data/policy_kb.yaml` (version `2026.11.28`, 63 rules):
+YouTube (21), Meta Community Standards (13, apply to Instagram), Instagram (7), and three
+advertising-regulator packs: India (5: ASCI, Department of Consumer Affairs / CCPA, SEBI),
+United States (9: FTC) and United Kingdom (8: ASA, CAP, CMA). Each rule has a CreatorShield
+ID (platforms don't number their policies), the official URL and title, the verification
+date, paraphrased key points, and optionally a verbatim quote. The loader (Pydantic) rejects
+non-official domains, non-https URLs and duplicate IDs. Rules are scoped by target platform
+(`app/platforms.py`: Shorts and long-form YouTube share YouTube's rules) and by the review's
+audience markets (`app/markets.py`): a regulator pack is citable only when its market is
+selected. A platform or market is offered only when the knowledge base holds rules for it,
+which is why TikTok is defined but not offered. The community-guideline check
 (`analysis/community_guidelines.py`) flags wording in the transcript, on-screen
 text, caption and hashtags. It does not classify frames.
+
+## Markets, briefs and readiness (`backend/app/analysis/`)
+
+```
+POST /api/quick-check ──► deterministic checks on caption + hashtags ──► findings, readiness,
+                          (no storage, no AI)                            caption fix, label table
+POST /api/analyses  {markets, brief | brief_id} ──► worker
+   ├─ deterministic.py     rules_for(platform, markets): platform-family rules + each market's
+   │                       rules; a finding when the caption's label is clear in some selected
+   │                       markets but not all
+   ├─ market_disclosure.py which label kinds each regulator treats as clear (ACCEPTED table)
+   ├─ prompt.py            the model sees only rules for the platform and the selected markets
+   ├─ validation.py        citations outside the platform or selected markets are removed
+   ├─ brief.py             the sponsor's brief vs caption, hashtags, speech and on-screen text
+   │                       (category brand_brief: a contract check, not counted in risk)
+   ├─ provenance.persist   writes findings, risk indicator, then outcome.refresh()
+   └─ outcome.py           readiness verdict stored on the review + one analysis_stats row
+GET /api/analyses/{id}  ──► readiness (readiness.py), caption fix (caption_fix.py) and the
+                            per-market label table are derived on read, never stored
+GET /api/insights       ──► aggregates analysis_stats (outcomes only, no content)
+```
+
+| Table | Purpose |
+|---|---|
+| `brand_briefs` | Saved briefs. A review stores its own copy in `analyses.brief` |
+| `workspace_settings` | One row: creator / agency mode, display name, default platform, markets and language |
+| `analysis_stats` | One row per completed review: date, platform, markets, verdict, risk indicator, finding counts, client label. Survives retention for `USAGE_STATS_RETENTION_DAYS`; removed by an explicit delete |
+
+Readiness is deliberately conservative: `fix_first` when any checklist row fails,
+`review` when anything warns, a finding needs a human, the review was limited, or the AI
+review did not complete; `ready` only when every row passes. It never says safe, approved
+or compliant.
 
 ## AI safety design
 

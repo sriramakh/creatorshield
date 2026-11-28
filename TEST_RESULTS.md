@@ -1,3 +1,36 @@
+# Test results — 2026-11-28 (hardening and creator tools)
+
+Environment: Windows 11 Pro · Python 3.13.14 · Node v24.18.0 · PostgreSQL 17.2 · Redis 8.10.3 ·
+FFmpeg N-129333 (2026-11-27 build) · Chromaprint fpcalc 1.6.2 · Tesseract 5.4.0 (eng, hin) · Next.js 16.4.6.
+All services ran natively from portable builds; no containers.
+
+| Check | Result |
+|---|---|
+| Backend unit + integration tests (`pytest`, real PostgreSQL, real FFmpeg / Whisper / Tesseract, mock AI) | **500 passed**, 0 failed (≈150 s) |
+| Ruff lint + format, mypy (74 files) | Pass |
+| Alembic: upgrade from empty, downgrade one step, upgrade again, `alembic check` | Pass, no drift |
+| Frontend ESLint, TypeScript, production build, `npm audit` | Pass, 0 vulnerabilities |
+| Playwright, real browser, stack started by `scripts/dev.ps1`, mock AI | **9 passed**: brand brief create / edit / delete; caption check (finding, suggested caption, apply clears it; hand-off to the review form); rights ledger; onboarding (save, skip); settings; upload with markets and a brief through to the verdict banner and export; policy library market packs |
+| Playwright — connected accounts (fake Instagram / YouTube server, separate database) | **1 passed**: connect ×2, import own posts, ownership refusal, disconnect |
+| Queue mode on Windows (API + RQ worker + Redis) | Works; a 27 s sample completes in about 5 s after the first run |
+| Text contrast, both themes (`frontend/scripts/contrast.mjs`) | Every pair meets WCAG AA |
+| Live AI review (Anthropic or OpenAI) | **Not run** in this pass: no API key was available. Provider request shapes are unit-tested with stubbed clients |
+| Docker Compose / Caddy | **Not built or run** (no Docker on this machine). Compose and Caddy files changed in this pass and need a container test before a pilot |
+| Real Instagram / Google OAuth, AudD, Google Vision | **Not tested** (need your developer accounts and keys) |
+| TikTok | Not offered: its policy pages could not be read from this network |
+
+New tests in this pass cover each fixed review finding and the new features: 277 added to
+the 223 that existed.
+
+Found and fixed while testing end to end: the API's CORS setup did not allow `PUT`, so
+saving settings and editing a brief failed from the browser in the two-origin dev setup
+(a test now checks every API method is allowed); two first requests on a fresh workspace
+could both try to create the settings row; the frontend refused the fake platform's
+plain-http sign-in address (now allowed for loopback only); the connected-accounts spec
+did not dismiss the first-run dialog on a fresh database.
+
+---
+
 # Test results — 2026-10-22 (updated: provenance & rights)
 
 Environment: Mac mini M4, 16 GB, macOS 26.5.2 · Python 3.13.12 · Node 25.8.1 ·

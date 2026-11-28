@@ -1,10 +1,24 @@
-# CreatorShield AI — v0.1 (MVP)
+# CreatorShield AI — v0.2
 
-Pre-publication policy-risk review for **YouTube Shorts** and **Instagram Reels**.
+Pre-publication review for **YouTube Shorts**, **YouTube videos** and **Instagram Reels**,
+for independent creators and for agencies.
 Upload a video (up to 30 minutes / 5 GB by default) with its caption and hashtags; CreatorShield transcribes
 speech, samples key frames, reads on-screen text, runs rule-based checks and an
 AI review against a **versioned knowledge base of verified official policy pages**,
-and returns a timestamped report with evidence, citations and suggested fixes.
+and returns one **publish-readiness verdict**, a timestamped report with evidence and
+citations, and suggested fixes.
+
+| For creators and agencies | What it does |
+|---|---|
+| **Caption check** | Checks a caption and hashtags as you type: disclosure, claims, community-guideline wording. Rule-based, instant, nothing stored |
+| **Audience markets** | Applies the advertising regulator's guidance for the audience you choose: India (ASCI, Department of Consumer Affairs), United States (FTC), United Kingdom (ASA, CAP, CMA). A label that is clear in one market can fall short in another ("Sponsored" is fine for the FTC and ASCI, not for the ASA) |
+| **Suggested caption** | Proposes the smallest edit that opens the caption with a label every selected market treats as clear |
+| **Brand briefs** | Checks the content against what the sponsor asked for: lines that must be said, wording and competitors to avoid, required hashtags, mentions and disclosure |
+| **Readiness verdict** | "No issues found by these checks", "Review before posting" or "Fix before posting", with a checklist of what was and was not looked at |
+| **Overview** | Outcomes over time (ready rate, where issues come from). Keeps outcomes only, never content |
+| **Rights and provenance** | Catalogue matching, rights ledger, optional song and web lookups, evidence pack |
+
+See [docs/creator-api.md](docs/creator-api.md) for the API behind these.
 
 > CreatorShield gives automated, heuristic guidance. It is not legal advice and
 > **cannot guarantee** that a platform will not remove, restrict, demonetize or
@@ -110,10 +124,30 @@ third-party footage, music or likeness:
 | `sample_tips_en.mp4` | English stretching tips — low-risk control |
 | `sample_promo_hi.mp4` | Hindi skin-cream promo with discount code |
 
+## Windows
+
+`scripts/dev.sh` is for macOS. On Windows use PowerShell:
+
+```powershell
+# one-time: PostgreSQL 17 and Redis running; ffmpeg, tesseract (with the eng and hin
+# language data), fpcalc and Node 20+ on PATH; then
+cd backend;  uv sync                     # or: python -m venv .venv; .venv\Scripts\pip install -e .
+cd ..\frontend; npm install
+# create the role and databases once (psql): creatorshield / creatorshield_dev,
+# databases creatorshield and creatorshield_test
+
+# every time
+scripts\dev.ps1                          # migrations, API, worker, frontend -> http://localhost:3000
+scripts\stop.ps1
+```
+
+If the tools are not on PATH, pass a script that adds them: `scripts\dev.ps1 -ToolsEnv C:\path\env.ps1`.
+The backend test suite passes on Windows with `PYTHONUTF8=1`.
+
 ## Tests
 
 ```bash
-cd backend && .venv/bin/pytest -q                       # 113 tests (uses creatorshield_test DB, mock AI, fake platform APIs)
+cd backend && .venv/bin/pytest -q                       # 500 tests (uses creatorshield_test DB, mock AI, fake platform APIs)
 cd backend && .venv/bin/ruff check app tests && .venv/bin/mypy app
 cd frontend && npm run lint && npm run typecheck && npm run build
 cd frontend && npx playwright test e2e/upload-to-report.spec.ts   # needs scripts/dev.sh running; uses the configured AI provider (paid if live)
@@ -126,7 +160,8 @@ See [TEST_RESULTS.md](TEST_RESULTS.md) for the latest results, including live AI
 ## Docker Compose
 
 `docker compose up --build` runs Postgres, Redis, API, worker and frontend in
-containers (reads `backend/.env`). The compose file is syntax-validated but has
+containers (reads `backend/.env`). Ports are published on 127.0.0.1 only (development
+has no login); the worker starts once the API has migrated the database and is healthy. The compose file is syntax-validated but has
 **not yet been built/run** on this machine — see TEST_RESULTS.md.
 
 ## Data handling
@@ -135,10 +170,30 @@ containers (reads `backend/.env`). The compose file is syntax-validated but has
 - Files above 1080p or 8 Mbps are re-encoded once to an H.264 1080p **working copy** before analysis (measured: 1 min of 4K HEVC in 12 s on an M-series Mac, 304 MB → 22 MB). The original's SHA-256 is recorded for evidence packs and identical-file matching, then the original is deleted. The copy drops container metadata such as GPS location.
 - Longer videos get more frames in the AI review (`FRAMES_PER_MINUTE`, 16–64 frames) and media timeouts that scale with length. Shorts over 3 minutes are flagged as publishing as a regular YouTube video.
 - No accounts, IP addresses or original filenames are stored.
+- A caption check (`POST /api/quick-check`) stores nothing.
+- The Overview page is built from one row per completed review holding its outcome only
+  (date, platform, markets, verdict, risk indicator, finding counts and the client label):
+  no caption, transcript, media or finding text. Rows are kept `USAGE_STATS_RETENTION_DAYS`
+  (default 365; 0 keeps none) and are removed when you delete the review.
+- Brand briefs stay until you delete them. A review keeps its own copy of the brief it used
+  and that copy is deleted with the review.
 - Everything for an analysis (video, frames, transcript, report) is deleted after
   `RETENTION_HOURS` (default 72), on demand from the UI/API (`DELETE /api/analyses/{id}`),
-  or immediately after processing with `DELETE_MEDIA_AFTER_ANALYSIS=true`.
-- `python -m app.cli purge-expired | delete-all | check-kb` for maintenance.
+  or immediately after processing with `DELETE_MEDIA_AFTER_ANALYSIS=true`. Expiry is
+  enforced by a scheduled maintenance pass (API and worker, every
+  `MAINTENANCE_INTERVAL_SECONDS`, default 15 min), not only when something is uploaded.
+  Deleting an analysis while it is processing also removes anything the job writes
+  afterwards; stored files without a database row are swept after `ORPHAN_GRACE_SECONDS`.
+- Paid-lookup records keep only the service, date and estimated cost (for the monthly
+  budget) once their analysis is deleted or expires; the stored response and the link
+  are removed, and records are dropped after the month and the cache period end.
+- Analyses left `processing`/`queued` by a crashed worker or lost queue are marked
+  failed (retryable with Rerun) after `JOB_TIMEOUT_SECONDS` + `STUCK_JOB_GRACE_SECONDS`.
+- Uploads over the size limit are refused with 413 while they arrive, before they are
+  written to disk.
+- Logs mask API keys, OAuth tokens, Basic/Bearer credentials, `key=`/`access_token=`
+  parameters and connection-string passwords, including in tracebacks.
+- `python -m app.cli purge-expired | delete-all | check-kb` for manual maintenance.
 - No social platform is scraped. Platform APIs are called only for accounts you connect, via official OAuth.
 - Catalogue fingerprints (frame hashes + audio fingerprint, no media) are kept for
   `CATALOGUE_RETENTION_DAYS` (default 365; YouTube imports ≤ 30 days) so later videos can be
@@ -152,6 +207,32 @@ containers (reads `backend/.env`). The compose file is syntax-validated but has
 - [DECISIONS.md](DECISIONS.md) — key technical decisions and trade-offs
 - [TASKS.md](TASKS.md) — milestone status and backlog
 - [TEST_RESULTS.md](TEST_RESULTS.md) — what was tested and how
+
+### Audience markets and disclosure labels
+
+A review targets one or more audience markets (`IN`, `US`, `UK`; default `DEFAULT_MARKETS`,
+overridable in Settings). Each market adds its regulator's rules to what the checks and the AI
+review may cite, and its view of which labels are clear:
+
+| Label in the caption | ASCI (India) | FTC (US) | ASA / CMA (UK) |
+|---|---|---|---|
+| Ad, Advert, Advertisement, Advertising | clear | clear | clear |
+| Sponsored, Paid partnership | clear | clear | not treated as clear |
+| Partnership with a named brand | clear | clear | not treated as clear |
+| Collaboration, #collab, #partner, Employee, Affiliate | clear | not treated as clear | not treated as clear |
+| Free gift | clear | clear | not treated as clear |
+| Gifted by a named brand | not treated as clear | clear | not treated as clear |
+| #sp, #spon, #gifted, #ambassador, "thanks to", "in association with" | not treated as clear | not treated as clear | not treated as clear |
+
+These tables paraphrase each regulator's published guidance (cited through the market's rules
+in the knowledge base) and live in `backend/app/analysis/market_disclosure.py`. They are review
+aids. The tool does not decide which country's rules govern a post, market packs are advisory,
+and whether a specific post is adequately disclosed remains a human judgement. A suggested
+caption is a starting point to edit, not a clearance.
+
+TikTok is defined as a target in `backend/app/platforms.py` but is not offered: its policy
+pages could not be read when the market packs were added, and a platform is only offered when
+the knowledge base holds rules for it.
 
 ### Sponsored-content review
 
